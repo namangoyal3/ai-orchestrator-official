@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import init_db
 from app.api import gateway, agents, tools, keys, analytics, marketplace, architect
 from app.seed import seed_database
+from app.seed_marketplace import seed_marketplace
 
 
 @asynccontextmanager
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     await seed_database()
+    await seed_marketplace()
     yield
     # Shutdown (nothing needed for SQLite)
 

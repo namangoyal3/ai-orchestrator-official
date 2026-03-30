@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { Search, Play, Loader as Loader2, ChevronDown, ChevronUp, CircleCheck as CheckCircle, Circle as XCircle } from "lucide-react";
 import Header from "@/components/Header";
 import { toolsApi, type ToolInfo } from "@/lib/api";
-import { fetchTools } from "@/lib/supabase-data";
 
 const MOCK_TOOLS: ToolInfo[] = [
   { slug: "web_scrape", name: "Web Scraper", description: "Fetch and extract content from any URL — text, links, metadata, or raw HTML.", category: "Web", icon: "🌐", is_builtin: true, requires_auth: false, parameters: { url: "string (required)", extract: "text|html|links|metadata" } },
@@ -52,7 +51,7 @@ export default function ToolsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchTools().then((d) => setTools(d.tools.length ? d.tools : MOCK_TOOLS)).catch(() => setTools(MOCK_TOOLS));
+    toolsApi.list().then((d) => setTools(d.tools)).catch(() => setTools(MOCK_TOOLS));
   }, []);
 
   const categories = ["All", ...Array.from(new Set(tools.map((t) => t.category)))];

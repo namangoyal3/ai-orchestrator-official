@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 import { Search, ExternalLink, Zap } from "lucide-react";
 import Header from "@/components/Header";
-import { type AgentInfo } from "@/lib/api";
-import { fetchAgents } from "@/lib/supabase-data";
+import { agentsApi, type AgentInfo } from "@/lib/api";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Research: "bg-purple-500/20 text-purple-400 border-purple-500/30",
@@ -67,7 +66,7 @@ export default function AgentsPage() {
   const [selected, setSelected] = useState<AgentInfo | null>(null);
 
   useEffect(() => {
-    fetchAgents().then((d) => setAgents(d.agents.length ? d.agents : MOCK_AGENTS)).catch(() => setAgents(MOCK_AGENTS));
+    agentsApi.list().then((d) => setAgents(d.agents)).catch(() => setAgents(MOCK_AGENTS));
   }, []);
 
   const categories = ["All", ...Array.from(new Set(agents.map((a) => a.category)))];

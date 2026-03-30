@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { Store, Sparkles, Bot, Wrench, Cpu, ChevronRight, Search, ListFilter as Filter, Loader as Loader2, CircleCheck as CheckCircle2, ArrowRight, Code as Code2, Copy, Check, Zap, Globe, Brain, ChartBar as BarChart3 } from "lucide-react";
 import clsx from "clsx";
 import { marketplaceApi, type AgentInfo, type ToolInfo, type LLMCard, type RepoCard, type FlowRecommendation } from "@/lib/api";
-import { fetchAgents, fetchTools, fetchLLMs, fetchRepos } from "@/lib/supabase-data";
 
 // ─── Category colours ──────────────────────────────────────────────────────
 
@@ -292,10 +291,10 @@ export default function MarketplacePage() {
 
   useEffect(() => {
     Promise.all([
-      fetchAgents(),
-      fetchTools(),
-      fetchLLMs(),
-      fetchRepos(),
+      marketplaceApi.agents(),
+      marketplaceApi.tools(),
+      marketplaceApi.llms(),
+      marketplaceApi.repos(),
     ]).then(([a, t, l, r]) => {
       setAgents(a.agents);
       setTools(t.tools);
