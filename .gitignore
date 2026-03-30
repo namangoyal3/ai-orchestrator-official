@@ -1,0 +1,18 @@
+.env
+__pycache__/
+*.pyc
+*.mp4
+*.mov
+.DS_Store
+venv/
+.venv/
+*.egg-info/
+dist/
+
+# AI Gateway
+backend/*.db
+backend/gateway.db
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+.gstack/
