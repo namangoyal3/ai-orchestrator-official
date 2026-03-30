@@ -1,12 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
-import {
-  Store, Sparkles, Bot, Wrench, Cpu, ChevronRight,
-  Search, Filter, Loader2, CheckCircle2, ArrowRight,
-  Code2, Copy, Check, Zap, Globe, Brain, BarChart3,
-} from "lucide-react";
+import { Store, Sparkles, Bot, Wrench, Cpu, ChevronRight, Search, ListFilter as Filter, Loader as Loader2, CircleCheck as CheckCircle2, ArrowRight, Code as Code2, Copy, Check, Zap, Globe, Brain, ChartBar as BarChart3 } from "lucide-react";
 import clsx from "clsx";
 import { marketplaceApi, type AgentInfo, type ToolInfo, type LLMCard, type RepoCard, type FlowRecommendation } from "@/lib/api";
+import { fetchAgents, fetchTools, fetchLLMs, fetchRepos } from "@/lib/supabase-data";
 
 // ─── Category colours ──────────────────────────────────────────────────────
 
@@ -295,10 +292,10 @@ export default function MarketplacePage() {
 
   useEffect(() => {
     Promise.all([
-      marketplaceApi.agents(),
-      marketplaceApi.tools(),
-      marketplaceApi.llms(),
-      marketplaceApi.repos(),
+      fetchAgents(),
+      fetchTools(),
+      fetchLLMs(),
+      fetchRepos(),
     ]).then(([a, t, l, r]) => {
       setAgents(a.agents);
       setTools(t.tools);
@@ -306,11 +303,10 @@ export default function MarketplacePage() {
       setRepos(r.repos);
       setAgentCats(a.categories ?? []);
       setToolCats(t.categories ?? []);
-      
-      const uniqueLangs = Array.from(new Set(r.repos.map(r => r.language.toUpperCase()))).filter(Boolean);
+
+      const uniqueLangs = Array.from(new Set(r.repos.map(rp => rp.language.toUpperCase()))).filter(Boolean);
       setRepoCats(uniqueLangs as string[]);
     }).catch(() => {
-      // Use registry data as fallback
     }).finally(() => setLoadingBrowse(false));
   }, []);
 
