@@ -23,25 +23,37 @@ async def get_summary(
     _, org = auth
     since = datetime.utcnow() - timedelta(days=days)
 
-    result = await db.execute(
+    # Fetch aggregate stats using only portable SQL functions (no CASE/CAST)
+    agg = await db.execute(
         select(
-            func.count(RequestLog.id).label("total_requests"),
-            func.sum(case((RequestLog.status == "completed", 1), else_=0)).label("successful"),
-            func.sum(case((RequestLog.status == "failed", 1), else_=0)).label("failed"),
-            func.sum(RequestLog.input_tokens).label("total_input_tokens"),
-            func.sum(RequestLog.output_tokens).label("total_output_tokens"),
-            func.sum(RequestLog.cost_usd).label("total_cost"),
-            func.avg(RequestLog.latency_ms).label("avg_latency"),
-        ).where(
+            func.count(RequestLog.id).label("total"),
+            func.sum(RequestLog.input_tokens).label("in_tok"),
+            func.sum(RequestLog.output_tokens).label("out_tok"),
+            func.sum(RequestLog.cost_usd).label("cost"),
+            func.avg(RequestLog.latency_ms).label("latency"),
+        ).where(RequestLog.org_id == org.id, RequestLog.created_at >= since)
+    )
+    agg_row = agg.first()
+
+    # Count by status with separate queries — avoids CAST/CASE portability issues
+    ok_result = await db.execute(
+        select(func.count(RequestLog.id)).where(
             RequestLog.org_id == org.id,
             RequestLog.created_at >= since,
+            RequestLog.status == "completed",
         )
     )
-    row = result.first()
+    fail_result = await db.execute(
+        select(func.count(RequestLog.id)).where(
+            RequestLog.org_id == org.id,
+            RequestLog.created_at >= since,
+            RequestLog.status == "failed",
+        )
+    )
 
-    total = row.total_requests or 0
-    successful = row.successful or 0
-    failed = row.failed or 0
+    total = agg_row.total or 0
+    successful = ok_result.scalar() or 0
+    failed = fail_result.scalar() or 0
 
     return {
         "period_days": days,
@@ -49,11 +61,11 @@ async def get_summary(
         "successful_requests": successful,
         "failed_requests": failed,
         "success_rate": round(successful / total * 100, 1) if total > 0 else 0,
-        "total_input_tokens": row.total_input_tokens or 0,
-        "total_output_tokens": row.total_output_tokens or 0,
-        "total_tokens": (row.total_input_tokens or 0) + (row.total_output_tokens or 0),
-        "total_cost_usd": round(row.total_cost or 0, 4),
-        "avg_latency_ms": round(row.avg_latency or 0),
+        "total_input_tokens": agg_row.in_tok or 0,
+        "total_output_tokens": agg_row.out_tok or 0,
+        "total_tokens": (agg_row.in_tok or 0) + (agg_row.out_tok or 0),
+        "total_cost_usd": round(agg_row.cost or 0, 4),
+        "avg_latency_ms": round(agg_row.latency or 0),
     }
 
 
