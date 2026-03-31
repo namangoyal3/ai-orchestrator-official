@@ -672,30 +672,48 @@ def _save_output(text: str, save_dir: str, task: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Namango Gateway — Product Builder Demo",
+        description="Namango Gateway — Build anything with AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--task", "-t",
-        choices=list(TASKS),
-        default=None,
-        help="Which product to build"
+        "prompt", nargs="?", default=None,
+        help="What to build, e.g. 'build a rate limiter in Python'"
     )
     parser.add_argument("--url",  default=DEFAULT_GATEWAY, help="Gateway base URL")
     parser.add_argument("--key",  default=DEFAULT_KEY,     help="Gateway API key")
     parser.add_argument("--save", metavar="DIR",           help="Save generated code to DIR")
-    parser.add_argument("--list", "-l", action="store_true", help="List all tasks and exit")
     args = parser.parse_args()
 
-    if args.list or args.task is None:
-        print(f"\n{BOLD}Available build tasks:{R}\n")
-        for k, t in TASKS.items():
-            print(f"  {CYAN}{k:<12}{R}  {BOLD}{t['title']}{R}")
-            print(f"  {'':12}  {DIM}{t['tagline']}{R}\n")
-        print(f"Usage: namango --task <name> [--save ./output]\n")
-        return
+    # Interactive prompt if nothing given
+    if not args.prompt:
+        print(f"\n{CYAN}  Namango Gateway — AI Product Builder{R}")
+        print(f"  {DIM}Describe what you want to build and the gateway will generate it.{R}\n")
+        try:
+            args.prompt = input(f"  {BOLD}What do you want to build?{R}  ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if not args.prompt:
+            return
 
-    task = TASKS[args.task]
+    # Build a task dict from the free-form prompt
+    title = args.prompt if len(args.prompt) <= 60 else args.prompt[:57] + "..."
+    task = {
+        "title":   title,
+        "tagline": "Custom build via Namango Gateway",
+        "model":   DEFAULT_MODEL,
+        "prompt":  (
+            f"Write a single, complete, fully-implemented Python file for the following:\n\n"
+            f"{args.prompt}\n\n"
+            "REQUIREMENTS:\n"
+            "- Single file, fully implemented — no stubs, no `pass`, no `# TODO`\n"
+            "- Start with an ASCII architecture diagram as a comment block\n"
+            "- Every function must contain real, working code\n"
+            "- Include a runnable demo / main block at the bottom\n"
+            "- Use only stdlib + httpx + rich (no other dependencies)\n"
+        ),
+    }
+
     stream_build(args.url, args.key, task, args.save)
 
 
