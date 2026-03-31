@@ -2,14 +2,20 @@
 AI Gateway Orchestrator — Main FastAPI Application
 """
 from contextlib import asynccontextmanager
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.database import init_db
-from app.api import gateway, agents, tools, keys, analytics, marketplace, architect, scraper
+from app.api import gateway, agents, tools, keys, analytics, marketplace, architect
 from app.seed import seed_database
+from app.scraper import RepoScraper
+
+logger = logging.getLogger(__name__)
+scheduler = AsyncIOScheduler()
 
 
 @asynccontextmanager
@@ -17,8 +23,29 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     await seed_database()
+    
+    # Start background scraper scheduler
+    try:
+        scraper = RepoScraper()
+        # Schedule scraping every hour
+        scheduler.add_job(
+            scraper.scrape_and_store,
+            'interval',
+            hours=1,
+            id='repo-scraper',
+            name='Hourly Repository Scraper',
+            misfire_grace_time=600  # 10 minute grace period
+        )
+        scheduler.start()
+        logger.info("✓ Repository scraper scheduled to run every hour")
+    except Exception as e:
+        logger.error(f"Failed to start scraper scheduler: {e}")
+    
     yield
-    # Shutdown (nothing needed for SQLite)
+    
+    # Shutdown
+    if scheduler.running:
+        scheduler.shutdown()
 
 
 app = FastAPI(
@@ -103,4 +130,3 @@ app.include_router(analytics.router)
 app.include_router(keys.router)
 app.include_router(marketplace.router)
 app.include_router(architect.router, prefix="/v1/architect", tags=["architect"])
-app.include_router(scraper.router, prefix="/v1", tags=["scraper"])
