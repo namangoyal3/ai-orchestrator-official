@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import gateway, agents, tools, keys, analytics, marketplace, architect
+from app.api import gateway, agents, tools, keys, analytics, marketplace, architect, scraper
 from app.seed import seed_database
 
 
@@ -103,3 +103,4 @@ app.include_router(analytics.router)
 app.include_router(keys.router)
 app.include_router(marketplace.router)
 app.include_router(architect.router, prefix="/v1/architect", tags=["architect"])
+app.include_router(scraper.router, prefix="/v1", tags=["scraper"])
