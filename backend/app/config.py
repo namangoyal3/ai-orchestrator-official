@@ -42,6 +42,10 @@ class Settings(BaseSettings):
                     RuntimeWarning,
                     stacklevel=2,
                 )
+        # Override CORS from env var if set
+        env_origins = os.getenv("ALLOWED_ORIGINS", "")
+        if env_origins:
+            self.allowed_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
 
     # Anthropic (primary LLM)
     anthropic_api_key: Optional[str] = None
@@ -58,8 +62,9 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     rate_limit_per_day: int = 10000
 
-    # CORS — use a specific list in production; "*" allows all origins (no credentials)
-    allowed_origins: list[str] = ["https://frontend-five-theta-69.vercel.app"]
+    # CORS — set ALLOWED_ORIGINS env var as comma-separated list in production
+    # e.g. ALLOWED_ORIGINS=https://your-app.vercel.app,https://namango.ai
+    allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     class Config:
         env_file = ".env"

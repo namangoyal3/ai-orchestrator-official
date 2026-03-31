@@ -252,19 +252,7 @@ def route_llm(
         if choice.provider.value in available:
             return choice
 
-    # Last resort: OpenRouter free tier (works with any OpenRouter key)
-    if "openrouter" in available:
-        logger.warning("All preferred models exhausted — falling back to OpenRouter free tier")
-        return LLMChoice(
-            provider=LLMProvider.OPENROUTER,
-            model_id="openrouter/auto",
-            display_name="OpenRouter Auto (free fallback)",
-            reason="All configured providers exhausted — using OpenRouter free routing",
-            cost_per_1m_input=0,
-            cost_per_1m_output=0,
-        )
-
-    raise RuntimeError("No LLM providers available. Please configure at least one API key.")
+    raise RuntimeError("No LLM providers available. Please configure at least one API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, or AWS credentials).")
 
 
 def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:

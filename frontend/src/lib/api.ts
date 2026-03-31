@@ -1,11 +1,14 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ai-gateway-backend-production.up.railway.app";
-const DEMO_KEY = "gw-demo-key-change-in-production-12345678";
 
 export function getApiKey(): string {
   if (typeof window !== "undefined") {
-    return localStorage.getItem("gw_api_key") || DEMO_KEY;
+    return localStorage.getItem("gw_api_key") || "";
   }
-  return DEMO_KEY;
+  return "";
+}
+
+export function hasApiKey(): boolean {
+  return getApiKey().length > 0;
 }
 
 export function setApiKey(key: string) {
@@ -136,7 +139,7 @@ export interface TimelinePoint {
 export const analyticsApi = {
   summary: (days = 30) => request<AnalyticsSummary>(`/v1/analytics/summary?days=${days}`),
   timeseries: (days = 14) => request<{ timeline: TimelinePoint[] }>(`/v1/analytics/timeseries?days=${days}`),
-  models: (days = 30) => request<{ models: Array<{ model: string; requests: number; cost: number }> }>(`/v1/analytics/models?days=${days}`),
+  models: (days = 30) => request<{ models: Array<{ model: string; display_name: string; requests: number; cost: number }> }>(`/v1/analytics/models?days=${days}`),
   categories: (days = 30) => request<{ categories: Array<{ category: string; requests: number }> }>(`/v1/analytics/categories?days=${days}`),
 };
 

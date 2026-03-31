@@ -69,7 +69,7 @@ async def get_timeseries(
 
     result = await db.execute(
         select(
-            func.strftime("%Y-%m-%d", RequestLog.created_at).label("date"),
+            func.date(RequestLog.created_at).label("date"),
             func.count(RequestLog.id).label("requests"),
             func.sum(RequestLog.cost_usd).label("cost"),
         )
@@ -115,9 +115,41 @@ async def get_model_usage(
     )
     rows = result.all()
 
+    _DISPLAY_NAMES = {
+        "openai/gpt-4o": "GPT-4o",
+        "openai/gpt-4o-mini": "GPT-4o Mini",
+        "anthropic/claude-3-5-sonnet": "Claude 3.5 Sonnet",
+        "anthropic/claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+        "anthropic/claude-3-haiku": "Claude 3 Haiku",
+        "meta-llama/llama-3.1-70b-instruct": "Llama 3.1 70B",
+        "meta-llama/llama-3.1-8b-instruct": "Llama 3.1 8B",
+        "mistralai/mistral-7b-instruct": "Mistral 7B",
+        "google/gemini-pro": "Gemini Pro",
+        "google/gemini-flash-1.5": "Gemini Flash 1.5",
+        "cohere/command-r-plus": "Command R+",
+        "claude-opus-4-6": "Claude Opus 4.6",
+        "claude-sonnet-4-6": "Claude Sonnet 4.6",
+        "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+        "gpt-4o": "GPT-4o",
+        "gpt-4o-mini": "GPT-4o Mini",
+        "gemini-2.0-flash": "Gemini 2.0 Flash",
+    }
+
+    def _display(model_id: str) -> str:
+        if model_id in _DISPLAY_NAMES:
+            return _DISPLAY_NAMES[model_id]
+        # Strip provider prefix: "meta-llama/llama-3.1-70b" → "llama-3.1-70b"
+        name = model_id.split("/")[-1] if "/" in model_id else model_id
+        return name.replace("-", " ").title()
+
     return {
         "models": [
-            {"model": row.selected_llm or "unknown", "requests": row.count, "cost": round(row.cost or 0, 4)}
+            {
+                "model": row.selected_llm or "unknown",
+                "display_name": _display(row.selected_llm or "unknown"),
+                "requests": row.count,
+                "cost": round(row.cost or 0, 4),
+            }
             for row in rows
         ]
     }

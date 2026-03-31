@@ -25,11 +25,11 @@ const EXAMPLE_PROMPTS = [
 ];
 
 const MODEL_COLORS: Record<string, string> = {
-  "claude-opus-4-6": "text-purple-400",
-  "claude-sonnet-4-6": "text-blue-400",
-  "claude-haiku-4-5-20251001": "text-emerald-400",
-  "gpt-4o": "text-amber-400",
-  "gemini-2.0-flash": "text-cyan-400",
+  "claude-opus-4-6": "text-purple-600",
+  "claude-sonnet-4-6": "text-blue-600",
+  "claude-haiku-4-5-20251001": "text-emerald-600",
+  "gpt-4o": "text-amber-600",
+  "gemini-2.0-flash": "text-cyan-600",
 };
 
 // All steps that can appear, in order
@@ -65,21 +65,21 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-      className="p-1.5 text-slate-400 hover:text-white rounded transition-colors"
+      className="p-1.5 text-slate-400 hover:text-slate-700 rounded transition-colors"
     >
-      {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+      {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
     </button>
   );
 }
 
-function MetaBadge({ icon: Icon, label, value, color = "text-slate-400" }: {
+function MetaBadge({ icon: Icon, label, value, color = "text-slate-500" }: {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string; value: string; color?: string;
 }) {
   return (
-    <div className="flex items-center gap-1.5 bg-slate-800 rounded-lg px-3 py-1.5">
+    <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5">
       <Icon size={13} className={color} />
-      <span className="text-slate-500 text-xs">{label}:</span>
+      <span className="text-slate-400 text-xs">{label}:</span>
       <span className={`text-xs font-medium ${color}`}>{value}</span>
     </div>
   );
@@ -121,20 +121,20 @@ console.log(data.response);`;
   const code = tab === "curl" ? curl : tab === "python" ? python : js;
 
   return (
-    <div className="border border-slate-700 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-800/60 border-b border-slate-700">
-        <span className="text-xs text-slate-400 font-medium">Reproduce via API</span>
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
+        <span className="text-xs text-slate-500 font-medium">Reproduce via API</span>
         <div className="flex gap-1">
           {(["curl", "python", "js"] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${tab === t ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}>
+              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${tab === t ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-slate-900"}`}>
               {t}
             </button>
           ))}
         </div>
       </div>
       <div className="relative">
-        <pre className="p-4 text-xs text-slate-300 font-mono overflow-x-auto bg-slate-900/60 leading-relaxed">{code}</pre>
+        <pre className="p-4 text-xs text-slate-700 font-mono overflow-x-auto bg-slate-50 leading-relaxed">{code}</pre>
         <div className="absolute top-2 right-2"><CopyButton text={code} /></div>
       </div>
     </div>
@@ -270,41 +270,41 @@ export default function PlaygroundPage() {
       <div className="flex flex-wrap gap-2">
         {EXAMPLE_PROMPTS.map(p => (
           <button key={p.label} onClick={() => setPrompt(p.prompt)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-300 transition-colors">
+            className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg text-sm text-slate-600 transition-colors">
             <span>{p.icon}</span><span>{p.label}</span>
           </button>
         ))}
       </div>
 
       {/* Input */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden focus-within:border-indigo-500 transition-colors">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask anything — the gateway will route to the right LLM, agents, and tools automatically..."
           rows={5}
-          className="w-full bg-transparent p-4 text-white placeholder-slate-500 resize-none outline-none text-sm leading-relaxed"
+          className="w-full bg-transparent p-4 text-slate-900 placeholder-slate-400 resize-none outline-none text-sm leading-relaxed"
         />
 
-        <div className="border-t border-slate-800 px-4 py-3">
+        <div className="border-t border-slate-200 px-4 py-3">
           <button onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 text-slate-400 hover:text-white text-xs transition-colors">
+            className="flex items-center gap-1.5 text-slate-400 hover:text-slate-700 text-xs transition-colors">
             {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             Advanced options
           </button>
           {showAdvanced && (
             <div className="mt-3 flex flex-col gap-3">
               <div className="flex items-center gap-3">
-                <Link2 size={14} className="text-slate-500 shrink-0" />
+                <Link2 size={14} className="text-slate-400 shrink-0" />
                 <input value={contextUrl} onChange={e => setContextUrl(e.target.value)}
                   placeholder="Context URL (optional — scrapes page content automatically)"
-                  className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none border border-slate-700 focus:border-indigo-500 transition-colors" />
+                  className="flex-1 bg-slate-50 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none border border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all" />
               </div>
               <div className="flex items-center gap-3">
-                <Cpu size={14} className="text-slate-500 shrink-0" />
+                <Cpu size={14} className="text-slate-400 shrink-0" />
                 <select value={model} onChange={e => setModel(e.target.value)}
-                  className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none border border-slate-700 focus:border-indigo-500 transition-colors">
+                  className="flex-1 bg-slate-50 rounded-lg px-3 py-2 text-sm text-slate-900 outline-none border border-slate-200 focus:border-indigo-400 transition-colors">
                   {MODELS.map(m => (
                     <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>
                   ))}
@@ -314,12 +314,12 @@ export default function PlaygroundPage() {
           )}
         </div>
 
-        <div className="border-t border-slate-800 px-4 py-3 flex items-center justify-between">
-          <span className="text-xs text-slate-600">⌘ + Enter to submit</span>
+        <div className="border-t border-slate-200 px-4 py-3 flex items-center justify-between">
+          <span className="text-xs text-slate-400">⌘ + Enter to submit</span>
           <div className="flex gap-2">
             {streaming && (
               <button onClick={() => abortRef.current?.abort()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-300 transition-colors">
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-sm text-slate-600 transition-colors">
                 <X size={13} /> Stop
               </button>
             )}
@@ -334,7 +334,7 @@ export default function PlaygroundPage() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded-xl p-4 text-red-400 text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm">{error}</div>
       )}
 
       {/* Two-column layout: pipeline flow + response */}
@@ -351,32 +351,32 @@ export default function PlaygroundPage() {
             {metadata && (
               <div className="flex flex-wrap gap-2">
                 <MetaBadge icon={Cpu} label="LLM" value={metadata.selected_llm}
-                  color={MODEL_COLORS[metadata.selected_llm] || "text-slate-300"} />
-                <MetaBadge icon={Zap} label="Category" value={metadata.task_category} color="text-indigo-400" />
-                {usage && <MetaBadge icon={Clock} label="Latency" value={`${usage.latency_ms}ms`} color="text-amber-400" />}
-                {usage && <MetaBadge icon={DollarSign} label="Cost" value={`$${usage.cost_usd.toFixed(5)}`} color="text-emerald-400" />}
+                  color={MODEL_COLORS[metadata.selected_llm] || "text-slate-600"} />
+                <MetaBadge icon={Zap} label="Category" value={metadata.task_category} color="text-indigo-600" />
+                {usage && <MetaBadge icon={Clock} label="Latency" value={`${usage.latency_ms}ms`} color="text-amber-600" />}
+                {usage && <MetaBadge icon={DollarSign} label="Cost" value={`$${usage.cost_usd.toFixed(5)}`} color="text-emerald-600" />}
                 {metadata.selected_agents.length > 0 && (
                   <MetaBadge icon={Bot} label="Agents" value={metadata.selected_agents.join(", ")} />
                 )}
                 {metadata.context_extracted && (
-                  <MetaBadge icon={Globe} label="Context" value="Extracted" color="text-cyan-400" />
+                  <MetaBadge icon={Globe} label="Context" value="Extracted" color="text-cyan-600" />
                 )}
               </div>
             )}
 
             {/* Why this routing */}
             {metadata?.routing_reason && (
-              <div className="border border-slate-800 rounded-xl overflow-hidden">
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <button onClick={() => setShowReason(!showReason)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-900 hover:bg-slate-800/60 transition-colors text-left">
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <Info size={13} className="text-indigo-400" />
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Info size={13} className="text-indigo-500" />
                     Why this routing?
                   </div>
-                  {showReason ? <ChevronUp size={13} className="text-slate-500" /> : <ChevronDown size={13} className="text-slate-500" />}
+                  {showReason ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
                 </button>
                 {showReason && (
-                  <div className="px-4 py-3 bg-slate-900/40 text-xs text-slate-400 leading-relaxed border-t border-slate-800">
+                  <div className="px-4 py-3 bg-white text-xs text-slate-500 leading-relaxed border-t border-slate-200">
                     {metadata.routing_reason}
                   </div>
                 )}
@@ -385,17 +385,17 @@ export default function PlaygroundPage() {
 
             {/* Response text */}
             {(hasResult || streaming) && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800">
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50">
                   <span className="text-xs text-slate-500 font-medium">Response</span>
                   {hasResult && <CopyButton text={streamedText} />}
                 </div>
-                <div className="p-4 text-sm text-slate-200 leading-relaxed whitespace-pre-wrap min-h-[80px]">
+                <div className="p-4 text-sm text-slate-800 leading-relaxed whitespace-pre-wrap min-h-[80px]">
                   {streamedText || (
-                    <span className="text-slate-600 italic text-xs">Waiting for response...</span>
+                    <span className="text-slate-400 italic text-xs">Waiting for response...</span>
                   )}
                   {streaming && streamedText && (
-                    <span className="inline-block w-2 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" />
+                    <span className="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-0.5 align-middle" />
                   )}
                 </div>
               </div>
@@ -403,12 +403,12 @@ export default function PlaygroundPage() {
 
             {/* Usage */}
             {usage && (
-              <div className="flex gap-4 text-xs text-slate-500">
+              <div className="flex gap-4 text-xs text-slate-400">
                 <span>{usage.input_tokens.toLocaleString()} input tokens</span>
                 <span>·</span>
                 <span>{usage.output_tokens.toLocaleString()} output tokens</span>
                 <span>·</span>
-                <span className="text-emerald-500">${usage.cost_usd.toFixed(6)} total cost</span>
+                <span className="text-emerald-600">${usage.cost_usd.toFixed(6)} total cost</span>
               </div>
             )}
 
@@ -416,7 +416,7 @@ export default function PlaygroundPage() {
             {hasResult && (
               <>
                 <button onClick={() => setShowSdk(!showSdk)}
-                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors w-fit">
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 transition-colors w-fit">
                   {showSdk ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                   {showSdk ? "Hide" : "Show"} API code to reproduce this
                 </button>

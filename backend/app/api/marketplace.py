@@ -373,7 +373,13 @@ Select 2-4 agents and 3-6 tools that are most relevant. Create 4-7 flow steps sh
     try:
         # Route to optimal LLM (fallback to Bedrock Haiku if direct Anthropic key missing)
         llm_choice = route_llm("marketplace_recommendation", ComplexityLevel.MEDIUM, "claude-haiku-4-5")
-        
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="AI recommendations require a configured LLM API key. Please set ANTHROPIC_API_KEY (or another provider key) in your environment.",
+        )
+
+    try:
         raw, _, _ = await execute_llm(
             llm_choice,
             messages=[{"role": "user", "content": prompt}],
