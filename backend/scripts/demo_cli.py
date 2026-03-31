@@ -25,6 +25,7 @@ import time
 import re
 import argparse
 import textwrap
+import shutil
 from pathlib import Path
 import httpx
 
@@ -351,9 +352,13 @@ TASKS = {
 
 # ── Architecture Renderer ─────────────────────────────────────────────────────
 
+def _term_width() -> int:
+    return max(60, min(72, shutil.get_terminal_size(fallback=(80, 24)).columns - 4))
+
+
 def render_gateway_architecture(steps_done: list[str], active_step: str | None) -> str:
     """Render the Namango gateway orchestration architecture as it executes."""
-    W = 72
+    W = _term_width()
 
     NODES = [
         ("context",     "🌐  Context Scraper"),
@@ -431,23 +436,24 @@ def record_step_done(step: str, label: str, details: dict) -> None:
 # ── Main streaming function ───────────────────────────────────────────────────
 
 def stream_build(gateway_url: str, api_key: str, task: dict, save_dir: str | None) -> None:
-    W = 72
+    W = _term_width()
+    IS_TTY = sys.stdout.isatty()
 
     # ── Header ─────────────────────────────────────────────────────────────
     print()
     print(f"{CYAN}╔{'═'*(W-2)}╗{R}")
-    print(f"{CYAN}║{BOLD}{'  🏗️  NAMANGO GATEWAY — PRODUCT BUILDER DEMO':^{W-2}}{R}{CYAN}║{R}")
+    print(f"{CYAN}║{BOLD}{'  NAMANGO GATEWAY — PRODUCT BUILDER DEMO':^{W-2}}{R}{CYAN}║{R}")
     print(f"{CYAN}╠{'═'*(W-2)}╣{R}")
-    print(f"{CYAN}║{R}  {BOLD}Task:{R}  {WHT}{task['title']}{R}")
+    print(f"{CYAN}║{R}  {BOLD}Task:{R}  {task['title']}")
     print(f"{CYAN}║{R}  {DIM}{task['tagline']}{R}")
-    print(f"{CYAN}║{R}  {DIM}Gateway: {gateway_url}{R}")
     print(f"{CYAN}╚{'═'*(W-2)}╝{R}")
     print()
 
     # ── Initial architecture render (all pending) ───────────────────────────
-    print(render_gateway_architecture([], None))
+    arch_text = render_gateway_architecture([], None)
+    print(arch_text)
     print()
-    print(f"  {DIM}Sending request to gateway...{R}")
+    print(f"  {DIM}Sending request to gateway...{R}", flush=True)
     print()
 
     steps_done: list[str] = []
@@ -457,12 +463,15 @@ def stream_build(gateway_url: str, api_key: str, task: dict, save_dir: str | Non
     metadata: dict = {}
     start = time.time()
 
-    CLEAR_ARCH = f"\033[{len(render_gateway_architecture([],[]).splitlines()) + 3}A"
+    arch_lines = len(arch_text.splitlines()) + 3  # arch + blank + status + blank
 
     def redraw(active: str | None = None) -> None:
-        print(CLEAR_ARCH, end="")
-        print(render_gateway_architecture(steps_done, active))
-        print()
+        if IS_TTY:
+            sys.stdout.write(f"\033[{arch_lines}A")
+            sys.stdout.flush()
+        new_arch = render_gateway_architecture(steps_done, active)
+        print(new_arch)
+        print(flush=True)
 
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
     body = {"prompt": task["prompt"], "preferred_model": task.get("model", DEFAULT_MODEL)}
