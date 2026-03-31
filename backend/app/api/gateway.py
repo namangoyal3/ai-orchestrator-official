@@ -142,11 +142,13 @@ async def query(
         )
 
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Orchestration failed for org=%s prompt=%r", org.id, request.prompt[:100])
         log.status = "failed"
         log.error_message = str(e)
         log.completed_at = datetime.utcnow()
         await db.commit()
-        raise HTTPException(status_code=500, detail=f"Orchestration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Orchestration failed — check server logs")
 
 
 @router.post("/query/stream", summary="Streaming version of /v1/query — returns SSE stream")

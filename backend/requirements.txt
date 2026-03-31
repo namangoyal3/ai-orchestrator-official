@@ -33,3 +33,4 @@ pytest-asyncio==0.25.0
 snscrape==0.7.0.20230622
 praw==7.7.1
 PyGithub==2.4.0
+greenlet>=3.0.0

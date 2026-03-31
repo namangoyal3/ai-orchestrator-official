@@ -1,0 +1,5 @@
+{
+  "deploy": {
+    "cmd": "bash /app/start.sh"
+  }
+}

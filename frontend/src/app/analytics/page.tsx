@@ -17,10 +17,14 @@ const MOCK_SUMMARY: AnalyticsSummary = {
   total_cost_usd: 18.43, avg_latency_ms: 1820,
 };
 
+// Stable values — no Math.random() to prevent chart flicker on re-render
+const MOCK_REQUESTS = [42, 38, 55, 61, 47, 53, 70, 66, 48, 59, 72, 65, 58, 80];
+const MOCK_COSTS    = [0.42, 0.35, 0.58, 0.67, 0.44, 0.51, 0.73, 0.69, 0.46, 0.61, 0.76, 0.68, 0.54, 0.83];
+
 const MOCK_TIMELINE: TimelinePoint[] = Array.from({ length: 14 }, (_, i) => ({
   date: new Date(Date.now() - (13 - i) * 86400000).toISOString().split("T")[0],
-  requests: Math.floor(Math.random() * 80) + 20,
-  cost: Math.round(Math.random() * 150) / 100,
+  requests: MOCK_REQUESTS[i],
+  cost: MOCK_COSTS[i],
 }));
 
 const MOCK_MODELS = [

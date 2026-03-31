@@ -10,12 +10,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.database import init_db
-from app.api import gateway, agents, tools, keys, analytics, marketplace, architect
+from app.api import gateway, agents, tools, keys, analytics, marketplace, architect, stacks
 from app.seed import seed_database
 from app.scraper import RepoScraper
-
-logger = logging.getLogger(__name__)
-scheduler = AsyncIOScheduler()
 
 
 @asynccontextmanager
@@ -41,6 +38,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start scraper scheduler: {e}")
     
+    yield
+    
+    # Shutdown
+    if scheduler.running:
+        scheduler.shutdown()
+>>>>>>> 2263a91f3cf3cc379784b9d146f49f6173f692da
     yield
     
     # Shutdown
@@ -85,12 +88,16 @@ app.add_middleware(
 )
 
 
-# Global error handler
+# Global error handler — log internally, never expose detail to clients
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    import logging
+    logging.getLogger("uvicorn.error").exception(
+        "Unhandled exception for %s %s", request.method, request.url.path
+    )
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)},
+        content={"error": "Internal server error"},
     )
 
 
@@ -130,3 +137,4 @@ app.include_router(analytics.router)
 app.include_router(keys.router)
 app.include_router(marketplace.router)
 app.include_router(architect.router, prefix="/v1/architect", tags=["architect"])
+app.include_router(stacks.router)

@@ -15,7 +15,6 @@ router = APIRouter(prefix="/v1/agents", tags=["Agents"])
 
 @router.get("", summary="List all available agents")
 async def list_agents(
-    auth: tuple[APIKey, Organization] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """List all built-in and custom agents available to your organization."""
@@ -62,7 +61,6 @@ async def list_agents(
 @router.get("/{slug}", summary="Get agent details")
 async def get_agent(
     slug: str,
-    auth: tuple[APIKey, Organization] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """Get details of a specific agent by slug."""

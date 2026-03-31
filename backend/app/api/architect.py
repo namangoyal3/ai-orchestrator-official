@@ -1,18 +1,22 @@
+import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal
 from app.database import get_db
 from app.models import Skill, MCP, LLMModel
-from app.llm_router import execute_llm, LLMChoice, LLMProvider, ComplexityLevel
+from app.llm_router import execute_llm, route_llm, LLMChoice, LLMProvider, ComplexityLevel
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
 
 class ArchitectRequest(BaseModel):
     prompt: str
-    optimization: str  # "cost" or "quality"
-    api_key: Optional[str] = None
+    optimization: Literal["cost", "quality"] = "quality"
+    # api_key removed — was leaking into server logs via request body; use X-API-Key header
+
 
 @router.post("/design")
 async def design_architecture(request: ArchitectRequest, db: AsyncSession = Depends(get_db)):
@@ -48,18 +52,8 @@ async def design_architecture(request: ArchitectRequest, db: AsyncSession = Depe
     if not llm_names:
         llm_names = ["anthropic/claude-3-5-sonnet", "openai/gpt-4o", "meta-llama/llama-3-8b-instruct"]
 
-    # 2. Architect LLM Logic
-    # We use a solid baseline model conceptually to do this routing
-    # But since execute_llm routes dynamically we can just use anthropic or openrouter
-    
-    architect_choice = LLMChoice(
-        provider=LLMProvider.OPENROUTER,
-        model_id="anthropic/claude-3-5-sonnet", # Claude 3.5 Sonnet is amazing at JSON architecture
-        display_name="Solutions Architect Model",
-        reason="Architect",
-        cost_per_1m_input=0,
-        cost_per_1m_output=0
-    )
+    # 2. Architect LLM Logic — route to best available provider (no hardcoded OpenRouter dependency)
+    architect_choice = route_llm("reasoning", ComplexityLevel.HIGH)
 
     system_prompt = f"""You are the Namango Solutions Architect AI. 
 The user wants to build an application. You MUST design the architecture selecting from the provided lists of available marketplace tools.
@@ -82,20 +76,21 @@ Available LLMs: {llm_names}
 
     try:
         response_text, _, _ = await execute_llm(architect_choice, messages, system_prompt, max_tokens=1024)
-        
-        # Strip standard markdown from response
+
+        # Strip markdown fences if model wraps JSON anyway
         response_text = response_text.replace("```json", "").replace("```", "").strip()
         import json
         data = json.loads(response_text)
         return data
-        
+
     except Exception as e:
-        # Fallback payload in case OpenRouter fails
+        # Log the real error server-side; return safe defaults to client
+        logger.exception("Architect LLM call failed for prompt=%r", request.prompt[:200])
         return {
             "framework": "LangChain (Python)",
-            "recommended_agents": ["Fallback Agent Analyzer"],
-            "recommended_mcps": ["GitHub Repository MCP"],
-            "recommended_llm": "meta-llama/llama-3-8b-instruct" if request.optimization == "cost" else "openai/gpt-4o",
-            "explanation": f"Failed to dynamically architect due to API error: {e}. Provided safe sandbox defaults.",
-            "error_fallback": True
+            "recommended_agents": ["research", "code"],
+            "recommended_mcps": ["web_search", "web_scrape"],
+            "recommended_llm": "gpt-4o-mini" if request.optimization == "cost" else "claude-opus-4-6",
+            "explanation": "Architecture defaults used — LLM unavailable at design time.",
+            "error_fallback": True,
         }

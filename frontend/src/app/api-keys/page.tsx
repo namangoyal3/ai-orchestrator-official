@@ -1,21 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
-  Plus, Copy, Check, Trash2, Eye, EyeOff, Shield, AlertTriangle, Key,
+  Plus, Copy, Check, Trash2, Eye, EyeOff, Shield, AlertTriangle, Key, Loader2,
 } from "lucide-react";
 import Header from "@/components/Header";
-
-interface ApiKeyEntry {
-  id: string;
-  name: string;
-  key?: string;
-  prefix: string;
-  is_active: boolean;
-  permissions: string[];
-  last_used_at: string | null;
-  expires_at: string | null;
-  created_at: string;
-}
+import { adminApi, API_BASE, getApiKey, setApiKey, type ApiKeyItem } from "@/lib/api";
 
 const PLANS = [
   { id: "starter", label: "Starter", rpm: 60, daily: 10000, features: ["All built-in agents", "All tools", "Basic analytics"] },
@@ -33,50 +22,94 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-const DEMO_KEYS: ApiKeyEntry[] = [
-  {
-    id: "1", name: "Demo Key", prefix: "gw-demo-key-...",
-    is_active: true, permissions: ["read", "write", "admin"],
-    last_used_at: new Date().toISOString(),
-    expires_at: null,
-    created_at: new Date().toISOString(),
-  },
-];
+// Derive org_id and stored keys from localStorage
+function getStoredOrgId(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("gw_org_id") || "";
+}
+
+function setStoredOrgId(id: string) {
+  if (typeof window !== "undefined") localStorage.setItem("gw_org_id", id);
+}
 
 export default function ApiKeysPage() {
-  const [keys, setKeys] = useState<ApiKeyEntry[]>(DEMO_KEYS);
+  const [keys, setKeys] = useState<ApiKeyItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [newKeyModal, setNewKeyModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
+  const [creating, setCreating] = useState(false);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [revoking, setRevoking] = useState<string | null>(null);
 
-  const createKey = () => {
+  // Load keys on mount using stored org_id, or seed from existing stored key
+  useEffect(() => {
+    const orgId = getStoredOrgId();
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
+    adminApi.listKeys(orgId)
+      .then((d) => setKeys(d.keys || []))
+      .catch(() => setKeys([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const createKey = async () => {
     if (!newKeyName.trim()) return;
-    const rawKey = `gw-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
-    const newKey: ApiKeyEntry = {
-      id: Math.random().toString(36).slice(2),
-      name: newKeyName,
-      key: rawKey,
-      prefix: rawKey.slice(0, 12) + "...",
-      is_active: true,
-      permissions: ["read", "write"],
-      last_used_at: null,
-      expires_at: null,
-      created_at: new Date().toISOString(),
-    };
-    setKeys((prev) => [newKey, ...prev]);
-    setCreatedKey(rawKey);
-    setNewKeyName("");
+    setCreating(true);
+    setCreateError(null);
+    try {
+      let orgId = getStoredOrgId();
+
+      // If no org exists yet, create one first
+      if (!orgId) {
+        const slug = `user-${Date.now().toString(36)}`;
+        const org = await adminApi.createOrg(newKeyName, slug) as { id: string };
+        orgId = org.id;
+        setStoredOrgId(orgId);
+      }
+
+      const result = await adminApi.createKey(orgId, newKeyName);
+      const rawKey = result.key;
+
+      // Save as the active key in localStorage so all API calls use it
+      setApiKey(rawKey);
+
+      const newEntry: ApiKeyItem = {
+        id: result.id,
+        name: newKeyName,
+        prefix: result.prefix,
+        is_active: true,
+        permissions: ["read", "write"],
+        last_used_at: null,
+        expires_at: null,
+        created_at: new Date().toISOString(),
+      };
+      setKeys((prev) => [newEntry, ...prev]);
+      setCreatedKey(rawKey);
+      setNewKeyName("");
+    } catch (e: unknown) {
+      setCreateError(e instanceof Error ? e.message : "Failed to create key");
+    } finally {
+      setCreating(false);
+    }
   };
 
-  const revokeKey = (id: string) => {
+  const revokeKey = async (id: string) => {
     setRevoking(id);
-    setTimeout(() => {
+    try {
+      await adminApi.revokeKey(id);
       setKeys((prev) => prev.map((k) => k.id === id ? { ...k, is_active: false } : k));
+    } catch {
+      // Optimistic update failed — revert
+    } finally {
       setRevoking(null);
-    }, 500);
+    }
   };
+
+  const activeKey = getApiKey();
 
   return (
     <div className="animate-fade-in">
@@ -89,8 +122,8 @@ export default function ApiKeysPage() {
             <Key size={16} className="text-indigo-400" />
             Quick Integration
           </h3>
-          <pre className="text-xs overflow-x-auto">{`# Submit any task to the AI Gateway
-curl -X POST http://localhost:8000/v1/query \\
+          <pre className="text-xs overflow-x-auto text-slate-300">{`# Submit any task to the AI Gateway
+curl -X POST ${API_BASE}/v1/query \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -106,12 +139,23 @@ curl -X POST http://localhost:8000/v1/query \\
 # ✓ Returns structured response with metadata`}</pre>
         </div>
 
+        {/* Active key banner */}
+        {activeKey && activeKey !== "gw-demo-key-change-in-production-12345678" && (
+          <div className="flex items-center gap-3 bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-4">
+            <Check size={15} className="text-emerald-400 shrink-0" />
+            <div>
+              <div className="text-emerald-400 text-sm font-medium">Active API key is set</div>
+              <div className="text-xs text-emerald-300/60 font-mono mt-0.5">{activeKey.slice(0, 16)}••••••••</div>
+            </div>
+          </div>
+        )}
+
         {/* Keys list */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl">
           <div className="flex items-center justify-between p-5 border-b border-slate-800">
             <h3 className="text-white font-semibold">API Keys</h3>
             <button
-              onClick={() => { setNewKeyModal(true); setCreatedKey(null); }}
+              onClick={() => { setNewKeyModal(true); setCreatedKey(null); setCreateError(null); }}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
             >
               <Plus size={15} />
@@ -126,7 +170,7 @@ curl -X POST http://localhost:8000/v1/query \\
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-emerald-400 text-sm">
                     <Check size={16} />
-                    <span>API key created! Copy it now — it won't be shown again.</span>
+                    <span>API key created! Copy it now — it won&apos;t be shown again.</span>
                   </div>
                   <div className="flex items-center gap-2 bg-slate-800 border border-emerald-500/30 rounded-lg px-4 py-3 font-mono text-sm text-emerald-300">
                     <span className="flex-1 break-all">{createdKey}</span>
@@ -137,69 +181,83 @@ curl -X POST http://localhost:8000/v1/query \\
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-3">
-                  <input
-                    value={newKeyName}
-                    onChange={(e) => setNewKeyName(e.target.value)}
-                    placeholder="Key name (e.g. Production, CI/CD)"
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 outline-none focus:border-indigo-500"
-                    onKeyDown={(e) => e.key === "Enter" && createKey()}
-                  />
-                  <button onClick={createKey} disabled={!newKeyName.trim()}
-                    className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm transition-colors">
-                    Create
-                  </button>
-                  <button onClick={() => setNewKeyModal(false)} className="text-slate-400 hover:text-slate-300 px-3 py-2 text-sm">
-                    Cancel
-                  </button>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <input
+                      value={newKeyName}
+                      onChange={(e) => setNewKeyName(e.target.value)}
+                      placeholder="Key name (e.g. Production, CI/CD)"
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 outline-none focus:border-indigo-500"
+                      onKeyDown={(e) => e.key === "Enter" && createKey()}
+                      disabled={creating}
+                    />
+                    <button onClick={createKey} disabled={!newKeyName.trim() || creating}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+                      {creating ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Create
+                    </button>
+                    <button onClick={() => setNewKeyModal(false)} className="text-slate-400 hover:text-slate-300 px-3 py-2 text-sm">
+                      Cancel
+                    </button>
+                  </div>
+                  {createError && (
+                    <p className="text-xs text-red-400">{createError}</p>
+                  )}
                 </div>
               )}
             </div>
           )}
 
           <div className="divide-y divide-slate-800">
-            {keys.map((key) => (
-              <div key={key.id} className="flex items-center gap-4 px-5 py-4">
-                <div className={`w-2 h-2 rounded-full shrink-0 ${key.is_active ? "bg-emerald-400" : "bg-slate-600"}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white text-sm font-medium">{key.name}</span>
-                    {!key.is_active && <span className="text-xs text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">Revoked</span>}
+            {loading ? (
+              <div className="p-8 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> Loading keys...
+              </div>
+            ) : keys.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-sm">
+                No API keys yet.{" "}
+                <button onClick={() => { setNewKeyModal(true); setCreatedKey(null); }} className="text-indigo-400 hover:underline">
+                  Create your first key →
+                </button>
+              </div>
+            ) : (
+              keys.map((key) => (
+                <div key={key.id} className="flex items-center gap-4 px-5 py-4">
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${key.is_active ? "bg-emerald-400" : "bg-slate-600"}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white text-sm font-medium">{key.name}</span>
+                      {!key.is_active && <span className="text-xs text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">Revoked</span>}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <code className="text-xs text-slate-400 font-mono">
+                        {key.prefix}•••
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1">
+                      {key.permissions.map((p) => (
+                        <span key={p} className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">{p}</span>
+                      ))}
+                      {key.last_used_at && (
+                        <span className="text-xs text-slate-600">
+                          Last used: {new Date(key.last_used_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs text-slate-400 font-mono">
-                      {showKey[key.id] && key.key ? key.key : key.prefix + "•••"}
-                    </code>
-                    {key.key && (
-                      <button onClick={() => setShowKey((p) => ({ ...p, [key.id]: !p[key.id] }))}
-                        className="text-slate-600 hover:text-slate-400">
-                        {showKey[key.id] ? <EyeOff size={12} /> : <Eye size={12} />}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <CopyBtn text={key.prefix} />
+                    {key.is_active && (
+                      <button onClick={() => revokeKey(key.id)}
+                        disabled={revoking === key.id}
+                        className="p-1.5 text-slate-500 hover:text-red-400 rounded transition-colors disabled:opacity-50">
+                        {revoking === key.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1">
-                    {key.permissions.map((p) => (
-                      <span key={p} className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">{p}</span>
-                    ))}
-                    {key.last_used_at && (
-                      <span className="text-xs text-slate-600">
-                        Last used: {new Date(key.last_used_at).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <CopyBtn text={key.key || key.prefix} />
-                  {key.is_active && (
-                    <button onClick={() => revokeKey(key.id)}
-                      disabled={revoking === key.id}
-                      className="p-1.5 text-slate-500 hover:text-red-400 rounded transition-colors">
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 

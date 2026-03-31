@@ -1,7 +1,7 @@
 {
   "name": "create-namango-app",
-  "version": "1.0.0",
-  "description": "Scaffold AI projects with pre-built agents from the Namango Marketplace",
+  "version": "2.0.0",
+  "description": "Namango CLI — Browse marketplace, run prompts, and generate product architectures from your terminal",
   "main": "bin/index.js",
   "bin": {
     "create-namango-app": "./bin/index.js",
@@ -13,7 +13,9 @@
   "dependencies": {
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
-    "inquirer": "^8.2.6"
+    "inquirer": "^8.2.6",
+    "cli-table3": "^0.6.3",
+    "ora": "^5.4.1"
   },
   "author": "",
   "license": "ISC"

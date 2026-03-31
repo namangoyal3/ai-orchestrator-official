@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "namango"
+version = "0.3.0"
+description = "Namango — AI Stack Intelligence for Product Builders"
+requires-python = ">=3.8"
+dependencies = ["httpx"]
+
+[project.scripts]
+namango = "namango.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

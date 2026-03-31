@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Search, Play, Loader2, ChevronDown, ChevronUp, CheckCircle, XCircle } from "lucide-react";
+import { Search, Play, Loader as Loader2, ChevronDown, ChevronUp, CircleCheck as CheckCircle, Circle as XCircle } from "lucide-react";
 import Header from "@/components/Header";
 import { toolsApi, type ToolInfo } from "@/lib/api";
 
