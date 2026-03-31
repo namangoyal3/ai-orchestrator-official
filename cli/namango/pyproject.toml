@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "namango"
-version = "0.1.0"
-description = "Namango AI Gateway — demo CLI"
+version = "0.3.0"
+description = "Namango — AI Stack Intelligence for Product Builders"
 requires-python = ">=3.8"
 dependencies = ["httpx"]
 
