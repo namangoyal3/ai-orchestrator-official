@@ -626,8 +626,8 @@ def main() -> None:
     parser.add_argument(
         "--task", "-t",
         choices=list(TASKS),
-        default="support",
-        help="Which product to build (default: support)"
+        default=None,
+        help="Which product to build"
     )
     parser.add_argument("--url",  default=DEFAULT_GATEWAY, help="Gateway base URL")
     parser.add_argument("--key",  default=DEFAULT_KEY,     help="Gateway API key")
@@ -635,12 +635,12 @@ def main() -> None:
     parser.add_argument("--list", "-l", action="store_true", help="List all tasks and exit")
     args = parser.parse_args()
 
-    if args.list:
+    if args.list or args.task is None:
         print(f"\n{BOLD}Available build tasks:{R}\n")
         for k, t in TASKS.items():
             print(f"  {CYAN}{k:<12}{R}  {BOLD}{t['title']}{R}")
             print(f"  {'':12}  {DIM}{t['tagline']}{R}\n")
-        print(f"Usage: python demo_cli.py --task <name> [--save ./output]\n")
+        print(f"Usage: namango --task <name> [--save ./output]\n")
         return
 
     task = TASKS[args.task]
