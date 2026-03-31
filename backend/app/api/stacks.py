@@ -108,7 +108,7 @@ STACK_CATALOG: dict[str, list[dict]] = {
 
 
 @router.get("/stacks", summary="Get curated product-building stack catalog")
-async def get_stacks(_: str = Depends(validate_api_key)):
+async def get_stacks():
     """
     Namango's curated catalog of real product-building tools organized by
     category (web, database, auth, payments, deploy, ai, etc.).

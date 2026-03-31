@@ -104,7 +104,7 @@ from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 @router.get("/agents", response_model=dict)
-async def list_marketplace_agents(db: AsyncSession = Depends(get_db), api_key=Depends(validate_api_key)):
+async def list_marketplace_agents(db: AsyncSession = Depends(get_db)):
     """All agents available in the marketplace, grouped by category."""
     agents = []
     
@@ -143,7 +143,7 @@ async def list_marketplace_agents(db: AsyncSession = Depends(get_db), api_key=De
 
 
 @router.get("/tools", response_model=dict)
-async def list_marketplace_tools(db: AsyncSession = Depends(get_db), api_key=Depends(validate_api_key)):
+async def list_marketplace_tools(db: AsyncSession = Depends(get_db)):
     """All tools available in the marketplace, grouped by category."""
     tools = []
     
@@ -179,7 +179,7 @@ async def list_marketplace_tools(db: AsyncSession = Depends(get_db), api_key=Dep
     return {"tools": [t.model_dump() for t in tools], "total": len(tools), "categories": categories}
 
 @router.get("/tools/{slug}", response_model=ToolCard)
-async def get_tool_details(slug: str, db: AsyncSession = Depends(get_db), api_key=Depends(validate_api_key)):
+async def get_tool_details(slug: str, db: AsyncSession = Depends(get_db)):
     """Fetch detailed metadata for a specific tool (used for CLI 'add' command)."""
     # Check Built-in
     if slug in TOOL_REGISTRY:
@@ -204,7 +204,7 @@ async def get_tool_details(slug: str, db: AsyncSession = Depends(get_db), api_ke
 
 
 @router.get("/llms", response_model=dict)
-async def list_marketplace_llms(api_key=Depends(validate_api_key)):
+async def list_marketplace_llms():
     """All LLMs available for routing."""
     best_for_map = {
         "claude-opus-4-6": ["Complex reasoning", "Architecture design", "Strategy", "Long-form writing"],
@@ -241,7 +241,7 @@ class RepoCard(BaseModel):
     topics: list[str]
 
 @router.get("/repos", response_model=dict)
-async def list_marketplace_repos(api_key=Depends(validate_api_key)):
+async def list_marketplace_repos():
     """Fetch top open-source AI repositories from GitHub."""
     import httpx
     try:

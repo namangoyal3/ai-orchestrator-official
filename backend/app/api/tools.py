@@ -17,7 +17,7 @@ class ToolExecuteRequest(BaseModel):
 
 
 @router.get("", summary="List all available tools")
-async def list_tools(auth: tuple[APIKey, Organization] = Depends(validate_api_key)):
+async def list_tools():
     """List all pre-built tool integrations available in the gateway."""
     tools = [
         {
@@ -37,7 +37,7 @@ async def list_tools(auth: tuple[APIKey, Organization] = Depends(validate_api_ke
 
 
 @router.get("/{slug}", summary="Get tool details")
-async def get_tool(slug: str, auth: tuple[APIKey, Organization] = Depends(validate_api_key)):
+async def get_tool(slug: str):
     """Get details and parameter schema for a specific tool."""
     if slug not in TOOL_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Tool '{slug}' not found.")
