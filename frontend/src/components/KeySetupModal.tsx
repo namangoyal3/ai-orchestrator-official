@@ -20,26 +20,26 @@ export default function KeySetupModal({ onClose }: KeySetupModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md mx-4 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-[#18181b] rounded-xl shadow-2xl border border-white/[0.1] w-full max-w-md mx-4 overflow-hidden animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.07]">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
-              <Key size={16} className="text-indigo-600" />
+            <div className="w-8 h-8 rounded-lg bg-brand-500/15 border border-brand-500/20 flex items-center justify-center">
+              <Key size={14} className="text-brand-400" />
             </div>
             <div>
-              <h2 className="text-slate-900 font-semibold text-sm">Enter your API key</h2>
-              <p className="text-slate-500 text-xs mt-0.5">Required to access the gateway</p>
+              <h2 className="text-white font-semibold text-[14px]">Enter your API key</h2>
+              <p className="text-zinc-500 text-[12px] mt-0.5">Required to access the gateway</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-            <X size={16} />
+          <button onClick={onClose} className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] rounded-lg transition-colors">
+            <X size={15} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4">
+        <div className="px-5 py-4 space-y-3">
           <div className="relative">
             <input
               type={show ? "text" : "password"}
@@ -47,37 +47,35 @@ export default function KeySetupModal({ onClose }: KeySetupModalProps) {
               onChange={e => setValue(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSave()}
               placeholder="gw-••••••••••••••••••••••••••••••••"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-10 text-slate-900 text-sm font-mono placeholder-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+              className="w-full bg-[#09090b] border border-white/[0.1] rounded-lg px-4 py-2.5 pr-10 text-zinc-200 text-[13px] font-mono placeholder-zinc-700 outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/30 transition-all"
               autoFocus
             />
             <button
               onClick={() => setShow(!show)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300 transition-colors"
             >
-              {show ? <EyeOff size={15} /> : <Eye size={15} />}
+              {show ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Your key is stored only in your browser (localStorage) and never sent to any server other than the gateway.
+          <p className="text-[12px] text-zinc-600 leading-relaxed">
+            Stored only in your browser — never sent to any third party.
           </p>
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-5 flex gap-2">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
+        <div className="px-5 pb-5 flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 px-4 py-2.5 rounded-lg border border-white/[0.08] text-zinc-400 text-[13px] font-medium hover:bg-white/[0.04] transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={!value.trim() || saved}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-medium transition-colors"
           >
             {saved ? (
-              <><CheckCircle2 size={15} className="text-emerald-300" /> Saved!</>
-            ) : (
-              "Save Key"
-            )}
+              <><CheckCircle2 size={14} className="text-emerald-300" /> Saved!</>
+            ) : "Save Key"}
           </button>
         </div>
       </div>
