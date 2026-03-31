@@ -79,8 +79,15 @@ async def get_timeseries(
     )
     rows = result.all()
 
-    # Fill in missing days with zeros
-    date_map = {row.date: {"requests": row.requests, "cost": round(row.cost or 0, 4)} for row in rows}
+    # Fill in missing days with zeros.
+    # func.date() returns a Python date object on PostgreSQL; convert to string for key lookup.
+    date_map = {
+        row.date.isoformat() if hasattr(row.date, "isoformat") else str(row.date): {
+            "requests": row.requests,
+            "cost": round(row.cost or 0, 4),
+        }
+        for row in rows
+    }
     timeline = []
     for i in range(days):
         date = (since + timedelta(days=i + 1)).strftime("%Y-%m-%d")
