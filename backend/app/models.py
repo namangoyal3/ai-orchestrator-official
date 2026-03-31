@@ -150,6 +150,23 @@ class Skill(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class TrendingRepo(Base):
+    __tablename__ = "trending_repos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    github_url = Column(String(500), unique=True, nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    stars = Column(Integer)
+    forks = Column(Integer)
+    language = Column(String(100))
+    topics = Column(JSON)
+    last_commit = Column(DateTime)
+    category = Column(String(50))  # 'agent', 'tool', 'mcp', 'general'
+    discovered_at = Column(DateTime, server_default=func.now())
+    source = Column(String(50))  # 'twitter', 'reddit'
+
+
 class MCP(Base):
     __tablename__ = "mcps"
 
