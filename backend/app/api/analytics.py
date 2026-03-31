@@ -4,7 +4,7 @@ Analytics endpoints — usage metrics, costs, and performance.
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, case
 
 from app.auth import validate_api_key
 from app.database import get_db
@@ -26,8 +26,8 @@ async def get_summary(
     result = await db.execute(
         select(
             func.count(RequestLog.id).label("total_requests"),
-            func.sum(func.cast(RequestLog.status == "completed", int)).label("successful"),
-            func.sum(func.cast(RequestLog.status == "failed", int)).label("failed"),
+            func.sum(case((RequestLog.status == "completed", 1), else_=0)).label("successful"),
+            func.sum(case((RequestLog.status == "failed", 1), else_=0)).label("failed"),
             func.sum(RequestLog.input_tokens).label("total_input_tokens"),
             func.sum(RequestLog.output_tokens).label("total_output_tokens"),
             func.sum(RequestLog.cost_usd).label("total_cost"),
@@ -74,7 +74,7 @@ async def get_timeseries(
             func.sum(RequestLog.cost_usd).label("cost"),
         )
         .where(RequestLog.org_id == org.id, RequestLog.created_at >= since)
-        .group_by(func.strftime("%Y-%m-%d", RequestLog.created_at))
+        .group_by(func.date(RequestLog.created_at))
         .order_by("date")
     )
     rows = result.all()
