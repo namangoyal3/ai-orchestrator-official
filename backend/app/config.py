@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 
     # CORS — set ALLOWED_ORIGINS env var as comma-separated list in production
     # e.g. ALLOWED_ORIGINS=https://your-app.vercel.app,https://namango.ai
-    allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    allowed_origins: list[str] = ["*"]
 
     class Config:
         env_file = ".env"
