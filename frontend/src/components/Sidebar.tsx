@@ -16,7 +16,7 @@ const MAIN_NAV = [
   { href: "/stacks",      label: "Stacks",      icon: Layers, badge: "NEW" },
 ];
 
-const MANAGEMENT_NAV = [
+const MANAGEMENT_NAV: { href: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; badge?: string }[] = [
   { href: "/agents",    label: "Agents",    icon: Bot },
   { href: "/tools",     label: "Tools",     icon: Wrench },
   { href: "/api-keys",  label: "API Keys",  icon: Key },
