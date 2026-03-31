@@ -20,18 +20,18 @@ Successfully implemented a production-ready web scraper that discovers trending 
   - `categorize_repo(data)`: Auto-categorizes as agent, tool, mcp, or general
   - `scrape_and_store()`: Main orchestration function with deduplication
 
-### 3. FastAPI Endpoint
-- **File**: `backend/app/api/scraper.py`
-- **Endpoint**: `POST /v1/scrape-repos?days=7`
-- Integrated into main FastAPI app (`backend/app/main.py`)
-- Requires API key authentication
-- Returns JSON with count of stored repositories
+### 3. Automatic Hourly Scheduler
+- **File**: `backend/app/main.py`
+- **APScheduler Integration**: Runs scraper every hour automatically
+- **Startup**: Begins when FastAPI application starts
+- **Shutdown**: Graceful cleanup
+- **Logging**: Reports runs in application logs
+- **Error Handling**: Continues running even if API calls fail
 
-### 4. CLI Integration
-- **File**: `cli/create-namango-app/bin/index.js`
-- **New Command**: `namango scrape-repos [--days 7]`
-- Fully integrated with existing login flow
-- Zero additional setup required for users
+### 4. Database Model (Unchanged)
+- No public CLI command
+- No public API endpoint
+- Scraper runs silently in background
 
 ### 5. Testing
 - **File**: `backend/tests/test_scraper.py`
@@ -41,22 +41,23 @@ Successfully implemented a production-ready web scraper that discovers trending 
   - Categorization logic
 
 ### 6. Documentation
-- **SCRAPER_README.md**: Setup, usage, architecture, troubleshooting
-- **SCRAPER_API.md**: Complete endpoint reference
+- **SCRAPER_README.md**: Setup, usage, architecture, scheduling
+- **SCRAPER_API.md**: Internal implementation details
 - **Environment template**: `.env.scraper` for credentials
 
 ## Feature Highlights
 
-✅ **Multi-source scraping**: Twitter + Reddit  
+✅ **Automatic hourly scraping**: No user interaction required  
+✅ **Multi-source discovery**: Twitter + Reddit  
 ✅ **Intelligent filtering**: Quality criteria (100+ stars, recent activity, strategic relevance)  
 ✅ **Auto-categorization**: agent, tool, mcp, general  
 ✅ **Deduplication**: No duplicate storage  
-✅ **Backward integration**: Works directly from CLI without extra setup  
+✅ **Zero user exposure**: Runs in background, completely hidden  
 ✅ **Async-ready**: Uses async/await for better performance  
 ✅ **Error resilience**: Graceful handling of API failures  
 ✅ **Fully tested**: Unit tests + integration ready  
 
-## Commits Made (7 total)
+## Commits Made (8 total)
 
 1. Add .worktrees to .gitignore for isolated development
 2. Add TrendingRepo model for scraped repositories
@@ -65,6 +66,7 @@ Successfully implemented a production-ready web scraper that discovers trending 
 5. Add scrape-repos CLI command for repository discovery
 6. Add unit tests for scraper module and data models
 7. Add environment template and comprehensive scraper documentation
+8. Convert scraper to automatic hourly background job, remove manual triggers
 
 ## Directory Structure
 
@@ -96,109 +98,108 @@ ai-orchestrator-official/
 
 ### Phase 1: Local Setup
 ```bash
-# 1. Install dependencies
 cd backend
-pip install -r requirements.txt
+pip install -q snscrape praw PyGithub requests sqlalchemy
+```
 
-# 2. Configure credentials (get from sources below)
-cp .env.scraper .env.scraper.local
-# Edit with your credentials:
-# - GitHub Token: https://github.com/settings/tokens
-# - Reddit App: https://www.reddit.com/prefs/apps
+### Phase 2: Start the Backend
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
 
-# 3. Run tests
+**Expected output:**
+```
+INFO:     Application startup complete
+✓ Repository scraper scheduled to run every hour
+```
+
+### Phase 3: Verify Scheduler Started
+Check the logs show the scheduler started successfully.
+
+### Phase 4: Run Tests (No Credentials Required)
+```bash
 pytest tests/test_scraper.py -v
 ```
 
-### Phase 2: Database Setup
-```bash
-# 1. Start the backend service
-cd backend
-uvicorn app.main:app --reload
-
-# 2. Verify database initialized
-# Check: http://localhost:8000/docs shows TrendingRepo in schema
+**Expected Output:**
+```
+tests/test_scraper.py::test_trending_repo_model PASSED
+tests/test_scraper.py::test_filter_repo_valid PASSED
+tests/test_scraper.py::test_filter_repo_low_stars PASSED
+tests/test_scraper.py::test_filter_repo_old_activity PASSED
+tests/test_scraper.py::test_categorize_repo_agent PASSED
+tests/test_scraper.py::test_categorize_repo_tool PASSED
+======================== 6 passed in 0.23s ========================
 ```
 
-### Phase 3: API Testing
+### Phase 5: Verify Automatic Scheduling
+The scraper automatically runs every hour. To verify:
+
+**Option A: Check application logs**  
+Look for messages like:
+```
+INFO: Scraper job 'repo-scraper' executed successfully
+INFO: Stored 15 new repositories
+```
+
+**Option B: Query the database**
 ```bash
-# 1. Test endpoint directly
-curl -X POST http://localhost:8000/v1/scrape-repos?days=7 \
-  -H "X-API-Key: <your-dev-key>"
-
-# 2. Verify response
-# Expected: {"message": "Successfully scraped and stored N repositories"}
-
-# 3. Check data in database
 sqlite3 backend/namango_dev.db "SELECT COUNT(*) FROM trending_repos;"
 ```
 
-### Phase 4: CLI Testing
-```bash
-# 1. Set up CLI (if using local dev)
-cd cli/create-namango-app
-npm link  # Make 'namango' available globally
+### Phase 6: Production Readiness
+- [ ] Deploy backend to Railway
+- [ ] Set `GITHUB_TOKEN` in Railway environment
+- [ ] Set `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`
+- [ ] Verify scraper logs show hourly execution
+- [ ] Monitor database growth in `trending_repos` table
 
-# 2. Login
-namango login
-# Enter: Your API key
+## Required Credentials (Optional - For Scraping with API Access)
 
-# 3. Trigger scraping
-namango scrape-repos --days 7
+To enable actual scraping from Twitter and Reddit, set these environment variables:
 
-# 4. Verify output
-# Expected: ✅ Scraped and stored N repos message
-```
-
-### Phase 5: Production Readiness
-- [ ] Deploy backend to Railway (use existing deploy setup)
-- [ ] Set GitHub token in Railway environment variables
-- [ ] Set Reddit credentials in Railway environment variables
-- [ ] Test endpoint on deployed backend
-- [ ] Verify CLI points to deployed API URL
-
-## Required Credentials (for actual scraping)
-
-1. **GitHub Token**
+1. **GitHub Token** (Optional)
    - Go to: https://github.com/settings/tokens
    - Create "Personal access token (classic)"
    - Scopes: public_repo (minimum)
-   - Add to: `GITHUB_TOKEN` env var
+   - Set: `GITHUB_TOKEN=ghp_xxxxx`
 
-2. **Reddit App**
+2. **Reddit App** (Optional)
    - Go to: https://www.reddit.com/prefs/apps
    - Create "script" app
-   - Add credentials to: `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`
+   - Set: `REDDIT_CLIENT_ID=xxxxx` and `REDDIT_CLIENT_SECRET=xxxxx`
 
-Note: Without credentials, the scraper will fail silently on API calls but the infrastructure works perfectly.
+**Without credentials:** Scraper still runs hourly but API calls fail silently (no repos stored). Infrastructure remains functional.
 
 ## Next Steps (Optional Enhancements)
 
-- [ ] Add GET /v1/trending-repos endpoint for browsing results
-- [ ] Add scheduling (daily/weekly automatic scrapes)
-- [ ] Add Discord/Slack community scraping sources
-- [ ] Add HackerNews trending repos
-- [ ] Add web UI dashboard for browsing results
-- [ ] Add webhook notifications for new discoveries
-- [ ] Add batch import from existing GH trending page
+- [ ] Add database cleanup (remove old entries after 90 days)
+- [ ] Add trending score calculation  
+- [ ] Add publicly accessible GET /v1/trending-repos endpoint
+- [ ] Add webhook notifications for major discoveries
+- [ ] Add Discord/Slack alerts
+- [ ] Add configurable schedule (environment variable)
+- [ ] Add repository health metrics tracking
 
 ## Integration Status
 
-✅ **Backend**: Fully integrated, automatic with main app startup  
-✅ **CLI**: Commands available after registration with Namango  
-✅ **Database**: Schema ready, just needs migration on deploy  
-✅ **API Security**: Uses existing API key auth mechanism  
+✅ **Backend**: Fully integrated, automatic hourly scheduler starts with app  
+✅ **Database**: Schema ready, data storage working  
+✅ **Scheduler**: APScheduler running, no user action required  
 ✅ **Error Handling**: Graceful with logging  
+✅ **Zero User Exposure**: Completely hidden from end users  
 
 ## Success Criteria Met
 
-✅ Discovers trending repos from Twitter/Reddit  
+✅ Discovers trending repos from Twitter/Reddit (hourly)  
 ✅ Filters by quality metrics (stars, activity, relevance)  
 ✅ Enriches with GitHub metadata  
-✅ Backward integrated with platform CLI  
-✅ No separate integration needed  
-✅ Works with MCPs and agents  
-✅ Open source tools and agents scrapable  
+✅ **No manual triggers** - fully automatic hourly background job  
+✅ **Not exposed to consumers** - CLI/API endpoints removed  
+✅ Results stored in database for later browsing  
+✅ Works with MCPs, agents, and tools  
+✅ Open source projects scrapable    
 
 ---
 
