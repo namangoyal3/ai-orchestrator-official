@@ -245,4 +245,39 @@ program
         }
     });
 
-program.parse(process.argv);
+program
+    .command('scrape-repos')
+    .description('Scrape trending open source repositories from Twitter and Reddit')
+    .option('--days <number>', 'Number of days to look back', '7')
+    .action(async (options) => {
+        const config = getConfig();
+        if (!config.apiKey) {
+            console.log(chalk.red('❌ Please login first: namango login'));
+            process.exit(1);
+        }
+
+        const apiUrl = process.env.NAMANGO_API_URL || 'https://ai-gateway-backend-production.up.railway.app';
+        const days = parseInt(options.days) || 7;
+
+        console.log(chalk.bold.blue('\n🔍 Scraping trending open source repositories...\n'));
+        console.log(chalk.cyan(`Searching the last ${days} days from Twitter and Reddit...\n`));
+
+        try {
+            const response = await fetch(`${apiUrl}/v1/scrape-repos?days=${days}`, {
+                method: 'POST',
+                headers: { 'X-API-Key': config.apiKey, 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Scraping failed with status ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log(chalk.green(`✅ ${result.message}\n`));
+            console.log(chalk.cyan('💡 Tip: Use the Namango platform to browse and explore these repositories.\n'));
+
+        } catch (err) {
+            console.log(chalk.red(`\n❌ Scraping failed: ${err.message}\n`));
+        }
+    });
+
