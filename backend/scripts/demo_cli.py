@@ -99,58 +99,88 @@ TASKS = {
         """),
     },
 
-    "router": {
-        "title":    "Build: Smart LLM Router in Python (meta-demo)",
-        "tagline":  "Cost Optimizer · Fallback Chain · Token Tracking · REST API",
+    "support": {
+        "title":    "Build: Customer Support Platform (SaaS Helpdesk)",
+        "tagline":  "Tickets · SLA Tracking · Auto-triage · Customer Portal · REST API",
         "model":    DEFAULT_MODEL,
         "prompt": textwrap.dedent("""\
-            Build a production-ready LLM router in Python — a mini version of what Namango does.
-            This must be real, runnable code.
+            Build a complete, production-ready customer support platform in Python.
+            This is a real B2B SaaS product — runnable code, not pseudocode.
 
             SYSTEM ARCHITECTURE (ASCII diagram required first):
-            Request → Classifier → Router → [Provider A / Provider B / Provider C] → Response + Cost Log
+            Customer → Submit Ticket → Auto-Triage (priority + category) → Agent Queue
+                                                                         → SLA Timer
+                                                                         → Email Notify
+            Agent → Respond → Customer Portal → Customer sees reply + status
 
             COMPONENTS TO BUILD:
 
-            1. classifier.py — Task classifier:
-               - classify(prompt: str) → TaskType (CODE | ANALYSIS | CREATIVE | SIMPLE | COMPLEX)
-               - Uses keyword matching + prompt length heuristics (no LLM needed)
-               - Returns: {type, complexity_score: 0-10, estimated_tokens: int}
+            1. models.py — Data models (SQLite via aiosqlite):
+               - Ticket: id, subject, body, customer_email, status (open/pending/resolved/closed),
+                         priority (low/medium/high/urgent), category (billing/bug/feature/general),
+                         created_at, updated_at, resolved_at, sla_deadline, agent_id
+               - Message: id, ticket_id, body, author_type (customer/agent/system), created_at
+               - Agent: id, name, email, active, current_load (# open tickets)
+               - Customer: id, email, name, company, plan (free/pro/enterprise)
 
-            2. router.py — Routing logic:
-               - route(task_type, budget_usd, max_latency_ms) → ProviderConfig
-               - Routing table (hardcoded, easily editable):
-                 SIMPLE + low_budget → groq/llama-3-8b ($0.0001/1k)
-                 CODE + any → openrouter/deepseek-coder ($0.0002/1k)
-                 COMPLEX + no_budget → openrouter/llama-3.1-70b ($0.0009/1k)
-                 CREATIVE + any → openrouter/mistral-7b ($0.0002/1k)
-               - Fallback chain: primary → secondary → tertiary (on error or timeout)
-               - Circuit breaker: disable provider for 60s after 3 consecutive failures
+            2. triage.py — Automatic ticket triage:
+               - triage(subject: str, body: str) → {priority, category, sla_hours}
+               - Priority rules:
+                 "urgent" | "down" | "outage" | "broken" → URGENT (SLA: 1h)
+                 "billing" | "charge" | "invoice" → HIGH (SLA: 4h)
+                 "bug" | "error" | "crash" → HIGH (SLA: 4h)
+                 "feature" | "request" | "suggestion" → LOW (SLA: 72h)
+                 default → MEDIUM (SLA: 24h)
+               - Category detection via keyword matching
+               - Returns SLA deadline = now + sla_hours
 
-            3. providers.py — Provider clients:
-               - OpenRouterProvider: calls openrouter.ai API, returns {text, input_tokens, output_tokens, cost_usd}
-               - MockProvider: for testing, returns random response + fake tokens
-               - All providers implement BaseProvider with async def complete(prompt, model, max_tokens)
+            3. api.py — FastAPI REST API:
+               Customer-facing endpoints:
+               - POST /tickets — submit new ticket {subject, body, customer_email}
+                   → auto-triages, assigns agent (round-robin by load), sends confirmation
+               - GET /tickets/{ticket_id}?email=... — customer views ticket + messages
+               - POST /tickets/{ticket_id}/reply — customer replies to ticket
+               - GET /tickets?email=... — customer sees all their tickets
 
-            4. tracker.py — Cost + usage tracking:
-               - SQLite-backed: table request_log(id, timestamp, provider, model, task_type, tokens, cost_usd, latency_ms)
-               - daily_summary() → prints table: {date, requests, total_tokens, total_cost, avg_latency}
-               - budget_alert(threshold_usd) → prints warning if daily spend exceeds threshold
+               Agent-facing endpoints:
+               - GET /agent/queue?agent_id=... — agent sees their open tickets (sorted by priority)
+               - POST /agent/tickets/{ticket_id}/reply — agent sends reply
+               - POST /agent/tickets/{ticket_id}/status — update status
+               - GET /agent/sla-breaches — tickets past SLA deadline (sorted by overdue time)
+               - GET /agent/stats — {open, pending, resolved_today, avg_response_time_hrs, sla_breach_rate}
 
-            5. api.py — FastAPI REST API:
-               - POST /route: {prompt, budget_usd?, max_latency_ms?} → {response, model_used, cost_usd, latency_ms}
-               - GET /stats: daily summary JSON
-               - GET /health: {status, providers: {name: "ok"|"circuit_open"}}
+            4. notifications.py — Email notification stubs:
+               - notify_customer_new_ticket(ticket) → prints formatted email to stdout
+               - notify_customer_reply(ticket, message) → prints formatted email
+               - notify_agent_assigned(agent, ticket) → prints formatted email
+               - notify_sla_warning(ticket, hours_remaining) → prints formatted alert
+               - (Real SMTP send behind a SEND_EMAIL=true env flag)
 
-            6. cli.py — Quick test CLI:
-               - python cli.py "explain recursion in one sentence"  → routes + prints response + cost
-               - python cli.py --stats  → prints daily cost table
-               - python cli.py --providers  → prints provider health
+            5. sla_monitor.py — Background SLA checker:
+               - Runs as asyncio task, checks every 5 minutes
+               - Finds tickets where sla_deadline < now and status not resolved/closed
+               - Calls notify_sla_warning for tickets within 30 min of breach
+               - Logs SLA breach to stderr with ticket_id, customer, priority, overdue_by
+
+            6. seed.py — Demo data seeder:
+               - Creates 3 agents, 10 customers (mix of free/pro/enterprise)
+               - Creates 20 tickets with realistic subjects/bodies/statuses
+               - Mix of priorities and categories
+               - Some tickets with multiple back-and-forth messages
+               - Some SLA-breached tickets for drama
+
+            7. cli.py — Quick demo runner:
+               - python cli.py submit --email alice@acme.com --subject "Payment failed" --body "..."
+               - python cli.py view --ticket TICKET-001 --email alice@acme.com
+               - python cli.py queue --agent 1
+               - python cli.py stats
+               - python cli.py seed  (runs seed.py)
 
             REQUIREMENTS:
-            - Zero external dependencies except: fastapi, uvicorn, httpx, rich, aiosqlite
-            - Complete working code, all imports included
-            - README.md: 3-command quickstart
+            - Dependencies: fastapi, uvicorn, aiosqlite, rich, httpx only
+            - All endpoints return proper JSON with status codes (201, 404, 422)
+            - Ticket IDs are human-readable: TICKET-001, TICKET-002, ...
+            - README.md: 5-command quickstart to run the full demo end-to-end
         """),
     },
 
@@ -596,8 +626,8 @@ def main() -> None:
     parser.add_argument(
         "--task", "-t",
         choices=list(TASKS),
-        default="taskqueue",
-        help="Which product to build (default: taskqueue)"
+        default="support",
+        help="Which product to build (default: support)"
     )
     parser.add_argument("--url",  default=DEFAULT_GATEWAY, help="Gateway base URL")
     parser.add_argument("--key",  default=DEFAULT_KEY,     help="Gateway API key")
