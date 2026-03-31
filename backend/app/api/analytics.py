@@ -5,8 +5,10 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, case
+import httpx
 
 from app.auth import validate_api_key
+from app.config import settings
 from app.database import get_db
 from app.models import APIKey, Organization, RequestLog
 
@@ -213,4 +215,60 @@ async def get_category_usage(
             {"category": row.task_category or "general", "requests": row.count}
             for row in rows
         ]
+    }
+
+
+@router.get("/openrouter", summary="OpenRouter key stats and free models")
+async def get_openrouter_analytics(
+    auth: tuple[APIKey, Organization] = Depends(validate_api_key),
+):
+    """Fetch OpenRouter API key usage stats and available free models."""
+    or_key = settings.openrouter_api_key
+    if not or_key:
+        return {"error": "OpenRouter API key not configured", "key_stats": None, "free_models": []}
+
+    headers = {"Authorization": f"Bearer {or_key}"}
+    key_stats = None
+    free_models = []
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Key usage stats
+        try:
+            r = await client.get("https://openrouter.ai/api/v1/auth/key", headers=headers)
+            if r.status_code == 200:
+                data = r.json().get("data", {})
+                key_stats = {
+                    "usage_total": round(data.get("usage", 0), 6),
+                    "usage_daily": round(data.get("usage_daily", 0), 6),
+                    "usage_weekly": round(data.get("usage_weekly", 0), 6),
+                    "usage_monthly": round(data.get("usage_monthly", 0), 6),
+                    "is_free_tier": data.get("is_free_tier", False),
+                    "limit": data.get("limit"),
+                }
+        except Exception:
+            pass
+
+        # Free models catalog
+        try:
+            r = await client.get("https://openrouter.ai/api/v1/models", headers=headers)
+            if r.status_code == 200:
+                all_models = r.json().get("data", [])
+                for m in all_models:
+                    pricing = m.get("pricing", {})
+                    if str(pricing.get("prompt", "1")) == "0":
+                        free_models.append({
+                            "id": m["id"],
+                            "name": m.get("name", m["id"]),
+                            "context_length": m.get("context_length", 0),
+                            "description": (m.get("description") or "")[:120],
+                        })
+                # Sort by context length desc
+                free_models.sort(key=lambda x: x["context_length"], reverse=True)
+        except Exception:
+            pass
+
+    return {
+        "key_stats": key_stats,
+        "free_models": free_models,
+        "free_models_count": len(free_models),
     }
