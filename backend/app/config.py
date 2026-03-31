@@ -7,7 +7,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     app_name: str = "AI Gateway Orchestrator"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"
     debug: bool = False
 
     # Database
