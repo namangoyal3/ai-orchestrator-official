@@ -1,3 +1,0 @@
-[options]
-installCmd = "/app/.venv/bin/pip install -r requirements-all.txt"
-startCmd = "python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"

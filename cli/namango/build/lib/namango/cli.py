@@ -25,6 +25,7 @@ import time
 import re
 import argparse
 import textwrap
+import shutil
 from pathlib import Path
 import httpx
 
@@ -53,185 +54,212 @@ TASKS = {
         "tagline":  "Workers · Queue · Retry Logic · Dashboard · CLI",
         "model":    DEFAULT_MODEL,
         "prompt": textwrap.dedent("""\
-            Build a complete, production-ready distributed task queue system in Python.
-            This must be real, runnable code — not pseudocode.
+            Write a single Python file called taskqueue.py — a complete, fully-implemented
+            in-process task queue with background workers. Every function must be fully
+            implemented with real code. No stubs, no `pass`, no `# TODO`.
 
-            SYSTEM ARCHITECTURE (ASCII diagram required first):
-            Show the full architecture: Producer → Queue → Workers → Result Store → CLI Monitor
+            First, print this ASCII architecture diagram as a comment block at the top:
+            # Producer → [Queue] → Worker-1
+            #                    → Worker-2   → ResultStore
+            #                    → Worker-3
+            # RetryWorker ← FailedQueue (up to 3 retries, exponential backoff)
 
-            COMPONENTS TO BUILD (each as a separate file):
+            IMPLEMENT ALL OF THE FOLLOWING in taskqueue.py (~120 lines):
 
-            1. queue_server.py — In-memory queue server over TCP (asyncio):
-               - ENQUEUE <task_id> <payload_json> → stores task
-               - DEQUEUE → returns next pending task (FIFO)
-               - ACK <task_id> → marks complete
-               - FAIL <task_id> <reason> → marks failed, increments retry count
-               - STATUS → returns JSON: {pending, running, done, failed, total}
-               - Auto-retry failed tasks up to 3 times with exponential backoff
+            class Task:
+                id: str          # uuid4
+                type: str        # "shell" | "http" | "python"
+                payload: dict    # {"cmd": "..."} or {"url": "..."} or {"code": "..."}
+                priority: int    # 1=low, 5=high (default 3)
+                status: str      # "pending" | "running" | "done" | "failed"
+                retries: int     # attempts so far
+                result: str      # output or error message
+                created_at: float
 
-            2. worker.py — Task worker process:
-               - Connects to queue server, polls for tasks
-               - Executes task based on task type: "shell" (runs command), "http" (hits URL), "python" (evals code)
-               - Reports ACK or FAIL back to server
-               - Graceful shutdown on SIGTERM
-               - Configurable concurrency (default: 4 parallel tasks)
+            class TaskQueue:
+                def enqueue(self, task_type, payload, priority=3) -> Task
+                def dequeue(self) -> Task | None   # returns highest-priority pending task
+                def ack(self, task_id, result)     # mark done
+                def fail(self, task_id, reason)    # mark failed, schedule retry if retries < 3
+                def status(self) -> dict            # {pending, running, done, failed, total}
+                def pending_list(self) -> list[Task]
 
-            3. producer.py — CLI to submit tasks:
-               - namango enqueue --type shell --cmd "echo hello" --priority high
-               - namango enqueue --type http --url https://api.example.com/ping
-               - namango enqueue --type python --code "import math; print(math.pi)"
-               - namango enqueue --file tasks.json  (bulk submit from file)
+            class Worker:
+                def __init__(self, queue: TaskQueue, worker_id: int)
+                def execute(self, task: Task) -> str:
+                    # "shell": subprocess.run(task.payload["cmd"], shell=True, capture_output=True)
+                    # "http":  httpx.get(task.payload["url"], timeout=10)
+                    # "python": exec(task.payload["code"]) capturing stdout via io.StringIO
+                    # returns output string or raises exception
 
-            4. monitor.py — Live terminal dashboard:
-               - Refreshes every second using curses or rich
-               - Shows: Queue depth graph (last 60s), Worker status table, Recent task log, Throughput (tasks/sec)
-               - Color-coded by status: pending=yellow, running=blue, done=green, failed=red
+            def run_demo():
+                # Creates a queue, submits 5 varied tasks (mix of types and priorities),
+                # runs 2 workers concurrently using threading.Thread,
+                # prints live status table every 0.5s using rich until all tasks complete,
+                # then prints final results table (id, type, status, result[:60])
 
-            5. Dockerfile + docker-compose.yml:
-               - server, 3 workers, producer all in separate containers
-               - Shared network, server exposed on port 9000
+            if __name__ == "__main__":
+                run_demo()
 
             REQUIREMENTS:
-            - Zero external dependencies except: asyncio, rich, httpx
-            - Complete imports in every file
-            - Each file must be < 150 lines (clean, readable)
-            - Include a README.md with quickstart (5 commands to run end-to-end demo)
+            - stdlib only (threading, subprocess, io, uuid, time) + httpx + rich
+            - All code fully implemented — no `pass`, no `...`, no stubs
+            - run_demo() must work when executed: python taskqueue.py
         """),
     },
 
     "support": {
         "title":    "Build: Customer Support Platform (SaaS Helpdesk)",
-        "tagline":  "Tickets · SLA Tracking · Auto-triage · Customer Portal · REST API",
+        "tagline":  "Tickets · SLA Tracking · Auto-triage · Agent Queue · REST API",
         "model":    DEFAULT_MODEL,
         "prompt": textwrap.dedent("""\
-            Build a complete, production-ready customer support platform in Python.
-            This is a real B2B SaaS product — runnable code, not pseudocode.
+            Write a single Python file called helpdesk.py — a complete, fully-implemented
+            customer support API. Every function must be fully implemented with real code.
+            No stubs, no `pass`, no `# TODO`, no `...`.
 
-            SYSTEM ARCHITECTURE (ASCII diagram required first):
-            Customer → Submit Ticket → Auto-Triage (priority + category) → Agent Queue
-                                                                         → SLA Timer
-                                                                         → Email Notify
-            Agent → Respond → Customer Portal → Customer sees reply + status
+            First, print this ASCII architecture diagram as a comment block at the top:
+            # Customer ──POST /tickets──▶ auto_triage() ──▶ SQLite DB
+            #                                 │                  │
+            #                          assign_agent()     sla_deadline set
+            #                                 │
+            # Agent ◀── GET /agent/queue ─────┘
+            # Agent ──POST /agent/reply──▶ notify customer
 
-            COMPONENTS TO BUILD:
+            IMPLEMENT ALL OF THE FOLLOWING in helpdesk.py (~150 lines), using FastAPI + sqlite3:
 
-            1. models.py — Data models (SQLite via aiosqlite):
-               - Ticket: id, subject, body, customer_email, status (open/pending/resolved/closed),
-                         priority (low/medium/high/urgent), category (billing/bug/feature/general),
-                         created_at, updated_at, resolved_at, sla_deadline, agent_id
-               - Message: id, ticket_id, body, author_type (customer/agent/system), created_at
-               - Agent: id, name, email, active, current_load (# open tickets)
-               - Customer: id, email, name, company, plan (free/pro/enterprise)
+            DATABASE (sqlite3, file: helpdesk.db, created on startup):
+            - tickets: id TEXT (TICKET-001...), subject, body, customer_email, status,
+                       priority, category, agent_id, sla_deadline, created_at, resolved_at
+            - messages: id, ticket_id, body, author (customer|agent), created_at
 
-            2. triage.py — Automatic ticket triage:
-               - triage(subject: str, body: str) → {priority, category, sla_hours}
-               - Priority rules:
-                 "urgent" | "down" | "outage" | "broken" → URGENT (SLA: 1h)
-                 "billing" | "charge" | "invoice" → HIGH (SLA: 4h)
-                 "bug" | "error" | "crash" → HIGH (SLA: 4h)
-                 "feature" | "request" | "suggestion" → LOW (SLA: 72h)
-                 default → MEDIUM (SLA: 24h)
-               - Category detection via keyword matching
-               - Returns SLA deadline = now + sla_hours
+            def auto_triage(subject: str, body: str) -> dict:
+                # Returns {priority, category, sla_hours} using keyword rules:
+                # subject/body contains "down"|"outage"|"broken" → priority=urgent, sla=1h
+                # contains "billing"|"charge"|"payment" → priority=high, sla=4h
+                # contains "bug"|"error"|"crash" → priority=high, sla=4h
+                # contains "feature"|"request" → priority=low, sla=72h
+                # else → priority=medium, sla=24h, category=general
+                # category: billing|bug|feature|general (from same keywords)
 
-            3. api.py — FastAPI REST API:
-               Customer-facing endpoints:
-               - POST /tickets — submit new ticket {subject, body, customer_email}
-                   → auto-triages, assigns agent (round-robin by load), sends confirmation
-               - GET /tickets/{ticket_id}?email=... — customer views ticket + messages
-               - POST /tickets/{ticket_id}/reply — customer replies to ticket
-               - GET /tickets?email=... — customer sees all their tickets
+            FastAPI app = FastAPI(title="Helpdesk API"):
 
-               Agent-facing endpoints:
-               - GET /agent/queue?agent_id=... — agent sees their open tickets (sorted by priority)
-               - POST /agent/tickets/{ticket_id}/reply — agent sends reply
-               - POST /agent/tickets/{ticket_id}/status — update status
-               - GET /agent/sla-breaches — tickets past SLA deadline (sorted by overdue time)
-               - GET /agent/stats — {open, pending, resolved_today, avg_response_time_hrs, sla_breach_rate}
+            POST /tickets  body: {subject, body, customer_email}
+                → calls auto_triage(), assigns agent_id = (ticket_count % 3) + 1
+                → inserts ticket with sla_deadline = now + sla_hours
+                → returns {ticket_id, priority, category, sla_deadline, agent_id, message: "Ticket created"}
 
-            4. notifications.py — Email notification stubs:
-               - notify_customer_new_ticket(ticket) → prints formatted email to stdout
-               - notify_customer_reply(ticket, message) → prints formatted email
-               - notify_agent_assigned(agent, ticket) → prints formatted email
-               - notify_sla_warning(ticket, hours_remaining) → prints formatted alert
-               - (Real SMTP send behind a SEND_EMAIL=true env flag)
+            GET /tickets/{ticket_id}
+                → returns ticket row + all messages for that ticket as {ticket: {...}, messages: [...]}
 
-            5. sla_monitor.py — Background SLA checker:
-               - Runs as asyncio task, checks every 5 minutes
-               - Finds tickets where sla_deadline < now and status not resolved/closed
-               - Calls notify_sla_warning for tickets within 30 min of breach
-               - Logs SLA breach to stderr with ticket_id, customer, priority, overdue_by
+            GET /tickets?email=alice@example.com
+                → returns all tickets for that customer email, sorted by created_at desc
 
-            6. seed.py — Demo data seeder:
-               - Creates 3 agents, 10 customers (mix of free/pro/enterprise)
-               - Creates 20 tickets with realistic subjects/bodies/statuses
-               - Mix of priorities and categories
-               - Some tickets with multiple back-and-forth messages
-               - Some SLA-breached tickets for drama
+            POST /tickets/{ticket_id}/reply  body: {body, customer_email}
+                → inserts message with author="customer", updates ticket status="pending"
+                → returns {message_id, ticket_id, status: "pending"}
 
-            7. cli.py — Quick demo runner:
-               - python cli.py submit --email alice@acme.com --subject "Payment failed" --body "..."
-               - python cli.py view --ticket TICKET-001 --email alice@acme.com
-               - python cli.py queue --agent 1
-               - python cli.py stats
-               - python cli.py seed  (runs seed.py)
+            GET /agent/queue?agent_id=1
+                → returns open+pending tickets for that agent, ordered by priority
+                   (urgent first, then high, medium, low), includes sla_breach=true if past deadline
+
+            POST /agent/reply  body: {ticket_id, body}
+                → inserts message with author="agent", updates ticket status="open"
+                → returns {message_id, ticket_id}
+
+            GET /agent/stats
+                → returns {total_open, total_pending, total_resolved, sla_breached, avg_resolution_hrs}
+                   computed with SQL COUNT and AVG queries
+
+            SEED DATA — on startup if DB is empty, insert:
+                3 tickets with different priorities and realistic subjects:
+                  TICKET-001: "Payment failed on checkout" (high, billing)
+                  TICKET-002: "App crashes on iOS 17" (high, bug)
+                  TICKET-003: "Add dark mode please" (low, feature)
+                With one message each from the customer.
 
             REQUIREMENTS:
-            - Dependencies: fastapi, uvicorn, aiosqlite, rich, httpx only
-            - All endpoints return proper JSON with status codes (201, 404, 422)
-            - Ticket IDs are human-readable: TICKET-001, TICKET-002, ...
-            - README.md: 5-command quickstart to run the full demo end-to-end
+            - Dependencies: fastapi, uvicorn only (sqlite3 is stdlib)
+            - All code fully implemented — no `pass`, no `...`, no stubs
+            - Run with: uvicorn helpdesk:app --reload
         """),
     },
 
     "monitor": {
         "title":    "Build: Real-Time API Cost Monitor",
-        "tagline":  "Multi-Provider · Budget Alerts · Terminal UI · Webhooks",
+        "tagline":  "Multi-Provider · Budget Alerts · Terminal Dashboard · CSV Export",
         "model":    DEFAULT_MODEL,
         "prompt": textwrap.dedent("""\
-            Build a real-time API cost monitoring tool that tracks spending across
-            OpenAI, Anthropic, and OpenRouter — runnable from a single Python file.
+            Write a single Python file called cost_monitor.py — a complete, fully-implemented
+            API cost tracker with a rich terminal dashboard. Every function must be fully
+            implemented with real code. No stubs, no `pass`, no `# TODO`.
 
-            SYSTEM ARCHITECTURE (ASCII diagram required first):
-            Providers → Fetcher (polling) → SQLite → Aggregator → [TUI Dashboard | Alert Engine | Webhook]
+            First, print this ASCII architecture diagram as a comment block at the top:
+            # Providers (OpenAI / Anthropic / OpenRouter)
+            #      │
+            #  log_usage()  ──▶  SQLite (usage_log table)
+            #      │
+            #  aggregate()  ──▶  [daily_cost, model_breakdown, budget_status]
+            #      │
+            #  check_alerts() ──▶  terminal warning if over threshold
+            #      │
+            #  dashboard()   ──▶  rich Live table (refreshes every 3s)
 
-            COMPONENTS TO BUILD:
+            IMPLEMENT ALL OF THE FOLLOWING in cost_monitor.py (~140 lines):
 
-            1. fetcher.py — Cost data fetcher:
-               - Polls each provider's billing API every 60 seconds
-               - OpenAI: GET https://api.openai.com/v1/usage (with OPENAI_API_KEY)
-               - Anthropic: parses usage from response headers (anthropic-tokens-used)
-               - OpenRouter: GET https://openrouter.ai/api/v1/auth/key (shows credits used)
-               - Stores raw usage events in SQLite
+            DATABASE (sqlite3, file: costs.db, auto-created):
+            - usage_log: id, provider, model, input_tokens, output_tokens,
+                         cost_usd, request_at (ISO timestamp)
 
-            2. aggregator.py — Usage aggregation:
-               - hourly_cost(provider) → cost per hour for last 24h
-               - model_breakdown() → {model: {requests, tokens, cost}} sorted by cost desc
-               - budget_status(daily_limit_usd) → {used, remaining, percent, on_track_to_exceed: bool}
-               - trend(days=7) → list of {date, cost} for sparkline
+            def log_usage(provider, model, input_tokens, output_tokens, cost_usd):
+                # Inserts a row into usage_log with current timestamp
 
-            3. alerts.py — Alert engine:
-               - check_budget(threshold_pct=80) → fires alert if over threshold
-               - Delivery methods: terminal bell + colored warning, webhook POST, email (smtplib)
-               - Cooldown: don't re-alert same threshold within 1 hour
-               - Config via ~/.namango/alerts.json
+            def daily_summary() -> list[dict]:
+                # Returns [{date, provider, requests, total_tokens, total_cost_usd}]
+                # grouped by date + provider, ordered by date desc, limit 14 days
 
-            4. dashboard.py — Rich terminal dashboard (refreshes every 5s):
-               - Top bar: total today / monthly pace / budget % bar
-               - Provider cards: each shows hourly sparkline + today's cost
-               - Model table: sorted by cost, with per-request cost
-               - Recent alerts panel: last 5 alerts with timestamps
+            def model_breakdown() -> list[dict]:
+                # Returns [{model, provider, requests, total_tokens, total_cost_usd, avg_cost_per_request}]
+                # ordered by total_cost_usd desc
 
-            5. monitor.py — Single entrypoint:
-               - python monitor.py --watch (live dashboard)
-               - python monitor.py --report (print daily report and exit)
-               - python monitor.py --set-budget openai 50 (set $50/day limit)
-               - python monitor.py --export csv (export last 30 days to CSV)
+            def budget_status(daily_limit_usd: float) -> dict:
+                # Returns {today_spend, daily_limit, pct_used, remaining, on_track_to_exceed}
+                # on_track_to_exceed: True if (today_spend / hours_elapsed * 24) > daily_limit
+
+            def check_alerts(daily_limit_usd: float, threshold_pct: float = 80.0) -> str | None:
+                # Returns a warning string if pct_used >= threshold_pct, else None
+                # e.g. "⚠️  BUDGET ALERT: 83% of $50.00 daily limit used ($41.50 of $50.00)"
+
+            def seed_demo_data():
+                # Inserts 30 realistic usage rows spread across last 7 days:
+                # Mix of providers: openai (gpt-4o, gpt-4o-mini), anthropic (claude-3-5-sonnet),
+                # openrouter (llama-3.1-70b), with realistic token counts and costs
+                # Only seeds if usage_log is empty
+
+            def print_dashboard(daily_limit_usd: float = 50.0):
+                # Uses rich to print:
+                # 1. A budget progress bar: "Today: $X.XX / $Y.YY  [=====>    ] 52%"
+                # 2. A Table: "Daily Summary (last 7 days)" with columns:
+                #    Date | Provider | Requests | Tokens | Cost
+                # 3. A Table: "Model Breakdown" with columns:
+                #    Model | Provider | Requests | Tokens | Total Cost | Avg/Request
+                # 4. Any budget alert in red if triggered
+
+            if __name__ == "__main__":
+                import sys
+                seed_demo_data()
+                if "--export" in sys.argv:
+                    # Print CSV of daily_summary() to stdout
+                    import csv, io
+                    rows = daily_summary()
+                    w = csv.DictWriter(io.sys.stdout, fieldnames=rows[0].keys())
+                    w.writeheader(); w.writerows(rows)
+                else:
+                    print_dashboard()
 
             REQUIREMENTS:
-            - Dependencies: rich, httpx, aiosqlite only
-            - All provider keys read from env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY)
-            - README with setup + first-run instructions
+            - Dependencies: rich only (sqlite3 is stdlib)
+            - All code fully implemented — no `pass`, no `...`, no stubs
+            - Run with: python cost_monitor.py
         """),
     },
 
@@ -240,77 +268,97 @@ TASKS = {
         "tagline":  "Ingestion · Transform · Fan-Out · Dead Letter · Metrics",
         "model":    DEFAULT_MODEL,
         "prompt": textwrap.dedent("""\
-            Build a complete async data pipeline framework in Python with fan-out,
-            dead letter queue, and metrics. Production-ready, runnable code.
+            Write a single Python file called pipeline.py — a complete, fully-implemented
+            async data pipeline with a fluent builder API, transforms, fan-out sinks, and
+            a dead letter queue. Every method must be fully implemented. No stubs, no `pass`.
 
-            SYSTEM ARCHITECTURE (ASCII diagram required first):
-            Source(s) → Ingester → [Transform Chain] → Fan-Out Router → Sink(s)
-                                                    ↓
-                                              Dead Letter Queue → Retry Worker
+            First, print this ASCII architecture diagram as a comment block at the top:
+            # Source ──▶ [FilterTransform] ──▶ [MapTransform] ──▶ FanOutRouter
+            #                                                           │
+            #                                              ┌───────────┼───────────┐
+            #                                           LogSink   FileSink   HTTPSink
+            #                                                           │
+            #                                              failed ──▶ DeadLetterQueue
+            #                                                           │
+            #                                              RetryWorker (up to 3x)
 
-            COMPONENTS TO BUILD:
+            IMPLEMENT ALL OF THE FOLLOWING in pipeline.py (~160 lines):
 
-            1. pipeline.py — Core pipeline engine:
-               - Pipeline(name) builder API:
-                 p = Pipeline("etl")
-                   .source(CSVSource("data.csv"))
-                   .transform(FilterTransform(lambda r: r["age"] > 18))
-                   .transform(MapTransform(lambda r: {**r, "name": r["name"].upper()}))
-                   .fan_out([
-                       Sink("postgres", PostgresSink(dsn=...)),
-                       Sink("s3",       S3Sink(bucket="output")),
-                       Sink("log",      LogSink()),
-                   ])
-                   .dead_letter(FileSink("failed.jsonl"))
-                 await p.run()
-               - Backpressure: max 1000 records in-flight, pause ingestion if exceeded
-               - Checkpoint: saves last processed offset to disk for resume
+            class Record:
+                data: dict
+                source: str
+                attempt: int = 0
 
-            2. sources.py — Data sources:
-               - CSVSource(path, batch_size=100): reads CSV in batches
-               - JSONLSource(path): reads newline-delimited JSON
-               - HTTPSource(url, interval_secs=60): polls HTTP endpoint for JSON
-               - AsyncGenSource(gen): wraps any async generator
+            class FilterTransform:
+                def __init__(self, predicate):  # e.g. lambda r: r["age"] > 18
+                def process(self, record: Record) -> Record | None:
+                    # Returns record if predicate(record.data) is True, else None (dropped)
 
-            3. transforms.py — Transformation primitives:
-               - FilterTransform(predicate): drops records not matching
-               - MapTransform(fn): 1-to-1 transformation
-               - FlatMapTransform(fn): 1-to-many expansion
-               - EnrichTransform(async_fn): async lookup enrichment (e.g. geocoding)
-               - ValidateTransform(schema: dict): JSON schema validation, routes invalid to DLQ
+            class MapTransform:
+                def __init__(self, fn):  # e.g. lambda r: {**r, "name": r["name"].upper()}
+                def process(self, record: Record) -> Record:
+                    # Returns new Record with data = fn(record.data)
 
-            4. sinks.py — Output sinks:
-               - LogSink: prints to stdout with pretty formatting
-               - FileSink(path): writes JSONL to file, flushes every 100 records
-               - HTTPSink(url): POSTs each record, retries 3x with backoff
-               - BufferedSink(inner, buffer_size=500): batches records before flushing
+            class LogSink:
+                def write(self, record: Record):
+                    # Prints: "[LogSink] {record.data}" to stdout
 
-            5. metrics.py — Pipeline metrics:
-               - Counters: records_in, records_out, records_failed, bytes_processed
-               - Timers: transform_latency_p50/p95/p99, sink_latency
-               - Reporter: prints live metrics table every 10s using rich
-               - Export: Prometheus /metrics endpoint (optional, via fastapi)
+            class FileSink:
+                def __init__(self, path: str)
+                def write(self, record: Record):
+                    # Appends JSON line to file at path (creates if not exists)
 
-            6. cli.py — Pipeline runner CLI:
-               - python cli.py run pipeline.yaml     (run from YAML config)
-               - python cli.py validate pipeline.yaml (dry-run, no sinks write)
-               - python cli.py stats                  (show last run metrics)
-               - python cli.py replay --from checkpoint.json (resume from checkpoint)
+            class DeadLetterQueue:
+                def __init__(self, path="failed.jsonl")
+                def push(self, record: Record, reason: str):
+                    # Appends {data, source, attempt, reason, failed_at} as JSON line to path
+                def drain(self) -> list[Record]:
+                    # Reads all records from file, returns as list, clears file
+
+            class Pipeline:
+                def __init__(self, name: str)
+                def source(self, records: list[dict]) -> "Pipeline":  # sets input records
+                def transform(self, t) -> "Pipeline":                 # appends to transform chain
+                def fan_out(self, sinks: list) -> "Pipeline":         # sets output sinks
+                def dead_letter(self, dlq: DeadLetterQueue) -> "Pipeline"
+
+                async def run(self) -> dict:
+                    # 1. For each record in source:
+                    #    a. Run through each transform in chain; if any returns None, skip record
+                    #    b. Fan out to all sinks; if a sink raises, push to DLQ with reason
+                    # 2. Returns {processed, dropped, failed, duration_ms}
+
+            async def demo():
+                # Creates a pipeline with:
+                # - 10 sample user records: [{"name": "Alice", "age": 17}, {"name": "Bob", "age": 25}, ...]
+                # - FilterTransform(lambda r: r["age"] >= 18)   # drop minors
+                # - MapTransform(lambda r: {**r, "name": r["name"].upper(), "verified": True})
+                # - fan_out: [LogSink(), FileSink("output.jsonl")]
+                # - dead_letter: DeadLetterQueue("failed.jsonl")
+                # Runs the pipeline and prints the result summary with rich:
+                #   "Pipeline 'demo' complete: 7 processed, 3 dropped, 0 failed in 12ms"
+
+            if __name__ == "__main__":
+                import asyncio
+                asyncio.run(demo())
 
             REQUIREMENTS:
-            - Dependencies: rich, httpx, aiofiles, pydantic only
-            - Full type annotations throughout
-            - Example pipeline.yaml showing real usage
-            - README: 3-command quickstart with sample data
+            - stdlib only (asyncio, json, time, dataclasses) + rich for the summary print
+            - All code fully implemented — no `pass`, no `...`, no stubs
+            - Run with: python pipeline.py
         """),
     },
 }
 
 # ── Architecture Renderer ─────────────────────────────────────────────────────
 
+def _term_width() -> int:
+    return max(60, min(72, shutil.get_terminal_size(fallback=(80, 24)).columns - 4))
+
+
 def render_gateway_architecture(steps_done: list[str], active_step: str | None) -> str:
     """Render the Namango gateway orchestration architecture as it executes."""
-    W = 72
+    W = _term_width()
 
     NODES = [
         ("context",     "🌐  Context Scraper"),
@@ -388,23 +436,24 @@ def record_step_done(step: str, label: str, details: dict) -> None:
 # ── Main streaming function ───────────────────────────────────────────────────
 
 def stream_build(gateway_url: str, api_key: str, task: dict, save_dir: str | None) -> None:
-    W = 72
+    W = _term_width()
+    IS_TTY = sys.stdout.isatty()
 
     # ── Header ─────────────────────────────────────────────────────────────
     print()
     print(f"{CYAN}╔{'═'*(W-2)}╗{R}")
-    print(f"{CYAN}║{BOLD}{'  🏗️  NAMANGO GATEWAY — PRODUCT BUILDER DEMO':^{W-2}}{R}{CYAN}║{R}")
+    print(f"{CYAN}║{BOLD}{'  NAMANGO GATEWAY — PRODUCT BUILDER DEMO':^{W-2}}{R}{CYAN}║{R}")
     print(f"{CYAN}╠{'═'*(W-2)}╣{R}")
-    print(f"{CYAN}║{R}  {BOLD}Task:{R}  {WHT}{task['title']}{R}")
+    print(f"{CYAN}║{R}  {BOLD}Task:{R}  {task['title']}")
     print(f"{CYAN}║{R}  {DIM}{task['tagline']}{R}")
-    print(f"{CYAN}║{R}  {DIM}Gateway: {gateway_url}{R}")
     print(f"{CYAN}╚{'═'*(W-2)}╝{R}")
     print()
 
     # ── Initial architecture render (all pending) ───────────────────────────
-    print(render_gateway_architecture([], None))
+    arch_text = render_gateway_architecture([], None)
+    print(arch_text)
     print()
-    print(f"  {DIM}Sending request to gateway...{R}")
+    print(f"  {DIM}Sending request to gateway...{R}", flush=True)
     print()
 
     steps_done: list[str] = []
@@ -414,12 +463,15 @@ def stream_build(gateway_url: str, api_key: str, task: dict, save_dir: str | Non
     metadata: dict = {}
     start = time.time()
 
-    CLEAR_ARCH = f"\033[{len(render_gateway_architecture([],[]).splitlines()) + 3}A"
+    arch_lines = len(arch_text.splitlines()) + 3  # arch + blank + status + blank
 
     def redraw(active: str | None = None) -> None:
-        print(CLEAR_ARCH, end="")
-        print(render_gateway_architecture(steps_done, active))
-        print()
+        if IS_TTY:
+            sys.stdout.write(f"\033[{arch_lines}A")
+            sys.stdout.flush()
+        new_arch = render_gateway_architecture(steps_done, active)
+        print(new_arch)
+        print(flush=True)
 
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
     body = {"prompt": task["prompt"], "preferred_model": task.get("model", DEFAULT_MODEL)}
@@ -620,30 +672,55 @@ def _save_output(text: str, save_dir: str, task: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Namango Gateway — Product Builder Demo",
+        description="Namango Gateway — Build anything with AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--task", "-t",
-        choices=list(TASKS),
-        default="support",
-        help="Which product to build (default: support)"
+        "prompt", nargs="?", default=None,
+        help="What to build, e.g. 'build a rate limiter in Python'"
     )
     parser.add_argument("--url",  default=DEFAULT_GATEWAY, help="Gateway base URL")
     parser.add_argument("--key",  default=DEFAULT_KEY,     help="Gateway API key")
     parser.add_argument("--save", metavar="DIR",           help="Save generated code to DIR")
-    parser.add_argument("--list", "-l", action="store_true", help="List all tasks and exit")
     args = parser.parse_args()
 
-    if args.list:
-        print(f"\n{BOLD}Available build tasks:{R}\n")
-        for k, t in TASKS.items():
-            print(f"  {CYAN}{k:<12}{R}  {BOLD}{t['title']}{R}")
-            print(f"  {'':12}  {DIM}{t['tagline']}{R}\n")
-        print(f"Usage: python demo_cli.py --task <name> [--save ./output]\n")
-        return
+    # Interactive prompt if nothing given
+    if not args.prompt:
+        print(f"\n{CYAN}  Namango Gateway — AI Product Builder{R}")
+        print(f"  {DIM}Be specific about what to build and for what domain.{R}")
+        print(f"  {DIM}Example: build a customer support helpdesk for a Zomato-like food delivery app{R}\n")
+        try:
+            args.prompt = input(f"  {BOLD}What do you want to build?{R}  ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if not args.prompt:
+            return
 
-    task = TASKS[args.task]
+    # Build a task dict from the free-form prompt
+    title = args.prompt if len(args.prompt) <= 60 else args.prompt[:57] + "..."
+    task = {
+        "title":   title,
+        "tagline": "Custom build via Namango Gateway",
+        "model":   DEFAULT_MODEL,
+        "prompt":  (
+            f"Write a single, complete, fully-implemented Python file for the following:\n\n"
+            f"{args.prompt}\n\n"
+            "Make the code domain-specific — use realistic data models, field names, "
+            "business logic, and seed data that match the described domain exactly. "
+            "For example if it's for a food delivery app, use orders, restaurants, "
+            "delivery partners, and food items. If it's for a hospital, use patients, "
+            "doctors, appointments. Mirror the real domain throughout.\n\n"
+            "REQUIREMENTS:\n"
+            "- Single file, fully implemented — no stubs, no `pass`, no `# TODO`\n"
+            "- Start with an ASCII architecture diagram as a comment block\n"
+            "- Every function must contain real, working code\n"
+            "- Seed data must use realistic names/values from the described domain\n"
+            "- Include a runnable demo / main block at the bottom\n"
+            "- Use only stdlib + httpx + rich (no other dependencies)\n"
+        ),
+    }
+
     stream_build(args.url, args.key, task, args.save)
 
 
