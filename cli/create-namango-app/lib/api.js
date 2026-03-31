@@ -1,4 +1,4 @@
-const BASE_URL = 'https://ai-gateway-backend-production.up.railway.app';
+const BASE_URL = process.env.NAMANGO_API_URL || 'https://ai-gateway-backend-production.up.railway.app';
 
 async function request(path, options = {}) {
     const config = require('./config');
@@ -21,6 +21,9 @@ async function request(path, options = {}) {
 module.exports = {
     health: () => request('/health'),
 
+    // Verifies the key is valid by calling an authenticated endpoint (not just /health which has no auth)
+    verifyKey: (apiKey) => request('/v1/marketplace/agents', { apiKey }),
+
     agents: () => request('/v1/marketplace/agents'),
     tools: () => request('/v1/marketplace/tools'),
     llms: () => request('/v1/marketplace/llms'),
@@ -30,10 +33,11 @@ module.exports = {
     query: (body) => request('/v1/query', { method: 'POST', body: JSON.stringify(body) }),
     history: (limit = 10) => request(`/v1/history?limit=${limit}`),
 
-    architect: (prompt, optimization, apiKey) =>
+    // api_key removed from body — key is sent via X-API-Key header in request()
+    architect: (prompt, optimization) =>
         request('/v1/architect/design', {
             method: 'POST',
-            body: JSON.stringify({ prompt, optimization, api_key: apiKey }),
+            body: JSON.stringify({ prompt, optimization }),
         }),
 
     recommend: (product_description, use_cases) =>

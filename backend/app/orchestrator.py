@@ -11,6 +11,8 @@ Flow:
 """
 import asyncio
 import json
+import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -18,6 +20,8 @@ from typing import Any, Optional
 import anthropic
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 from app.llm_router import (
     LLMChoice, ComplexityLevel, MODELS,
     route_llm, execute_llm, estimate_cost,
@@ -104,16 +108,17 @@ async def analyze_intent(prompt: str, context_snippet: str = "") -> dict:
         # Parse JSON response
         return json.loads(text)
 
-    except json.JSONDecodeError:
-        # Fallback to defaults
+    except json.JSONDecodeError as e:
+        logger.warning("Intent analysis returned non-JSON: %s (raw: %.200s)", e, locals().get("text", ""))
         return {
             "task_category": "general",
             "complexity": "medium",
             "needed_capabilities": ["reasoning", "text_generation"],
             "suggested_tools": [],
-            "reasoning": "Could not analyze intent, using defaults",
+            "reasoning": "Could not parse intent JSON, using defaults",
         }
-    except Exception:
+    except Exception as e:
+        logger.exception("Intent analysis failed: %s", e)
         return {
             "task_category": "general",
             "complexity": "medium",
@@ -190,12 +195,20 @@ async def execute_tool_pipeline(
             params = {"text": context or prompt}
         elif slug == "calculator":
             # Try to extract expression from prompt
-            import re
             nums = re.findall(r'[\d\s\+\-\*\/\(\)\.]+', prompt)
             params = {"expression": nums[0].strip() if nums else "1+1"}
         elif slug == "weather":
-            # Extract location from prompt (simple heuristic)
-            params = {"location": "New York"}  # Default; production: NER
+            # Extract location from prompt — look for "in <City>" or "for <City>" patterns
+            location_match = re.search(
+                r'\b(?:in|for|at|weather\s+(?:in|for|at)?)\s+([A-Z][a-zA-Z\s]{2,30}?)(?:\?|$|,|\.|weather)',
+                prompt,
+            )
+            if location_match:
+                params = {"location": location_match.group(1).strip()}
+            else:
+                # Cannot reliably infer location — skip this tool rather than hallucinate "New York"
+                logger.debug("weather tool: no location found in prompt, skipping")
+                return {}
         else:
             # Skip tools that need explicit params not inferable from prompt
             return {}

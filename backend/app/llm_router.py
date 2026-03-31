@@ -2,12 +2,15 @@
 LLM Router — automatically selects the best model based on task complexity,
 category, and available provider keys.
 """
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 import anthropic
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProvider(str, Enum):
@@ -114,11 +117,13 @@ MODELS = {
     ),
 }
 
-# Mapping of Anthropic direct IDs to Bedrock equivalents
+# Mapping of Anthropic direct IDs to nearest Bedrock equivalents.
+# NOTE: claude-4.x models are not yet available on Bedrock — these fall back to
+# the closest available Bedrock generation. Upgrade these IDs when Bedrock adds claude-4.
 ANTHROPIC_TO_BEDROCK = {
-    "claude-opus-4-6": "anthropic.claude-3-opus-20240229-v1:0",
-    "claude-sonnet-4-6": "anthropic.claude-3-5-sonnet-20240620-v1:0",
-    "claude-haiku-4-5": "anthropic.claude-3-haiku-20240307-v1:0",
+    "claude-opus-4-6": "anthropic.claude-3-opus-20240229-v1:0",       # best available Bedrock fallback
+    "claude-sonnet-4-6": "anthropic.claude-3-5-sonnet-20240620-v1:0", # best available Bedrock fallback
+    "claude-haiku-4-5": "anthropic.claude-3-haiku-20240307-v1:0",     # best available Bedrock fallback
 }
 
 # Task category → recommended model mapping
@@ -142,22 +147,30 @@ CATEGORY_TO_MODEL = {
 }
 
 
+_PLACEHOLDER_PREFIXES = ("your-", "sk-your-", "change-me", "replace-me", "xxx")
+
+
+def _is_real_key(value: Optional[str]) -> bool:
+    """Return True only if the value looks like a real key, not a placeholder."""
+    if not value:
+        return False
+    lower = value.lower()
+    return not any(lower.startswith(p) for p in _PLACEHOLDER_PREFIXES)
+
+
 def get_available_providers() -> set[str]:
-    """Return set of providers with valid API keys configured."""
+    """Return set of providers with real (non-placeholder) API keys configured."""
     available = set()
-    if settings.anthropic_api_key:
+    if _is_real_key(settings.anthropic_api_key):
         available.add("anthropic")
-    if settings.openai_api_key:
+    if _is_real_key(settings.openai_api_key):
         available.add("openai")
-    if settings.google_api_key:
+    if _is_real_key(settings.google_api_key):
         available.add("google")
     if settings.aws_access_key_id and settings.aws_secret_access_key:
         available.add("aws")
-    if settings.openrouter_api_key:
+    if _is_real_key(settings.openrouter_api_key):
         available.add("openrouter")
-    
-    # Always include anthropic as it's the primary if key is set
-    # (Though logic below ensures keys are present)
     return available
 
 
@@ -181,10 +194,14 @@ def route_llm(
             return None
         choice = MODELS[model_id]
         
-        # If choice is Anthropic but key is missing, check Bedrock equivalent
+        # If Anthropic key missing, fall back to nearest Bedrock equivalent (older generation)
         if choice.provider == LLMProvider.ANTHROPIC and "anthropic" not in available:
             bedrock_id = ANTHROPIC_TO_BEDROCK.get(model_id)
             if bedrock_id and "aws" in available:
+                logger.warning(
+                    "Anthropic key unavailable — falling back from %s to Bedrock %s (different model generation)",
+                    model_id, bedrock_id,
+                )
                 return MODELS[bedrock_id]
         
         if choice.provider.value in available:
@@ -234,7 +251,19 @@ def route_llm(
     for choice in MODELS.values():
         if choice.provider.value in available:
             return choice
-            
+
+    # Last resort: OpenRouter free tier (works with any OpenRouter key)
+    if "openrouter" in available:
+        logger.warning("All preferred models exhausted — falling back to OpenRouter free tier")
+        return LLMChoice(
+            provider=LLMProvider.OPENROUTER,
+            model_id="openrouter/auto",
+            display_name="OpenRouter Auto (free fallback)",
+            reason="All configured providers exhausted — using OpenRouter free routing",
+            cost_per_1m_input=0,
+            cost_per_1m_output=0,
+        )
+
     raise RuntimeError("No LLM providers available. Please configure at least one API key.")
 
 

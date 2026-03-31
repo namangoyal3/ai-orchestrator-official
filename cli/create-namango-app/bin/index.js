@@ -9,6 +9,10 @@ const config = require('../lib/config');
 const api = require('../lib/api');
 const ui = require('../lib/ui');
 
+// GPT-4o pricing for cost comparison (per token)
+const GPT4O_INPUT_PER_TOKEN  = 5.00  / 1_000_000;  // $5/1M input
+const GPT4O_OUTPUT_PER_TOKEN = 15.00 / 1_000_000;  // $15/1M output
+
 program
     .version('2.0.0')
     .description('Namango CLI — AI Gateway Platform from your terminal');
@@ -35,12 +39,17 @@ program
 
         const spin = ui.spinner('Verifying credentials...');
         try {
-            await api.health();
+            // Verify the key itself by calling an authenticated endpoint, not just /health
+            await api.verifyKey(apiKey);
             config.save({ apiKey });
             spin.succeed(ui.SUCCESS('Authenticated successfully'));
             console.log(ui.DIM('    Key stored at: ~/.namango/config.json\n'));
         } catch (e) {
-            spin.fail(ui.ERR('Could not reach platform: ' + e.message));
+            if (e.message && (e.message.includes('401') || e.message.toLowerCase().includes('invalid'))) {
+                spin.fail(ui.ERR('Invalid API key — check your key and try again'));
+            } else {
+                spin.fail(ui.ERR('Could not reach platform: ' + e.message));
+            }
         }
     });
 
@@ -232,6 +241,7 @@ program
     .option('-m, --model <model>', 'Preferred LLM model')
     .option('-a, --agents <agents>', 'Comma-separated agent slugs')
     .option('-t, --tools <tools>', 'Comma-separated tool slugs')
+    .option('--context-url <url>', 'Scrape this URL as context before running')
     .option('--json', 'Output raw JSON response')
     .action(async (promptWords, options) => {
         config.requireAuth();
@@ -251,8 +261,12 @@ program
         if (options.model) body.preferred_model = options.model;
         if (options.agents) body.preferred_agents = options.agents.split(',').map(s => s.trim());
         if (options.tools) body.preferred_tools = options.tools.split(',').map(s => s.trim());
+        if (options.contextUrl) body.context_url = options.contextUrl;
 
-        const spin = ui.spinner('Processing prompt...');
+        const spinMsg = options.contextUrl
+            ? `Scraping context from ${options.contextUrl.slice(0, 60)}...`
+            : 'Processing prompt...';
+        const spin = ui.spinner(spinMsg);
         try {
             const res = await api.query(body);
             spin.stop();
@@ -272,27 +286,191 @@ program
             ui.keyValue('LLM Used', res.orchestration.selected_llm);
             ui.keyValue('Agents', res.orchestration.selected_agents.join(', ') || 'none');
             ui.keyValue('Tools', res.orchestration.selected_tools.join(', ') || 'none');
+            if (res.orchestration.context_extracted) ui.keyValue('Context', 'Extracted from URL');
             ui.keyValue('Routing', res.orchestration.routing_reason);
 
             if (res.orchestration.tools_executed && res.orchestration.tools_executed.length > 0) {
                 console.log('');
-                ui.keyValue('Tools Executed', '');
+                console.log(ui.ACCENT('    Execution:'));
                 res.orchestration.tools_executed.forEach(t => {
-                    const status = t.success ? ui.SUCCESS('OK') : ui.ERR('FAIL');
+                    const status = t.success ? ui.SUCCESS('✓') : ui.ERR('✗');
                     console.log(`      ${status} ${chalk.white(t.tool)}`);
                 });
             }
 
             console.log('');
-            ui.sectionHeader('Usage');
-            ui.keyValue('Input Tokens', res.usage.input_tokens.toLocaleString());
-            ui.keyValue('Output Tokens', res.usage.output_tokens.toLocaleString());
-            ui.keyValue('Cost', '$' + res.usage.cost_usd.toFixed(6));
+            ui.sectionHeader('Cost');
+            const inputTokens  = res.usage.input_tokens  || 0;
+            const outputTokens = res.usage.output_tokens || 0;
+            const gpt4oCost = (inputTokens * GPT4O_INPUT_PER_TOKEN) + (outputTokens * GPT4O_OUTPUT_PER_TOKEN);
+            const actualCost = res.usage.cost_usd || 0;
+            const savedPct = gpt4oCost > 0 ? ((gpt4oCost - actualCost) / gpt4oCost * 100) : 0;
+
+            ui.keyValue('This request', '$' + actualCost.toFixed(6));
+            ui.keyValue('GPT-4o equiv', '$' + gpt4oCost.toFixed(6) + ui.DIM('  (estimated)'));
+            console.log(`    ${ui.DIM('Saved:')} ${chalk.green(savedPct.toFixed(1) + '%')}  ${ui.DIM('vs GPT-4o direct')}`);
+            ui.keyValue('Input Tokens', inputTokens.toLocaleString());
+            ui.keyValue('Output Tokens', outputTokens.toLocaleString());
             ui.keyValue('Latency', res.usage.latency_ms + 'ms');
             console.log('');
         } catch (e) {
             spin.fail(ui.ERR(e.message));
         }
+    });
+
+// ─── DESIGN (marketplace recommend — describe product → full stack) ───────────
+
+program
+    .command('design [description...]')
+    .description('Describe your product → get a recommended agent/tool/LLM stack')
+    .option('-u, --use-cases <cases>', 'Comma-separated use cases')
+    .option('--json', 'Output raw JSON')
+    .action(async (descWords, options) => {
+        config.requireAuth();
+        let description = descWords.join(' ');
+
+        if (!description) {
+            ui.banner();
+            console.log(ui.ACCENT('  Describe the product or workflow you want to build.'));
+            console.log(ui.DIM('  Namango will recommend the optimal agent + tool + LLM stack\n'));
+            const answers = await inquirer.prompt([{
+                type: 'input',
+                name: 'description',
+                message: chalk.cyan('What are you building?'),
+                validate: input => input.length > 10 ? true : 'Please describe in more detail',
+            }]);
+            description = answers.description;
+        }
+
+        const useCases = options.useCases
+            ? options.useCases.split(',').map(s => s.trim())
+            : [];
+
+        const spin = ui.spinner('Designing your optimal AI stack...');
+        try {
+            const rec = await api.recommend(description, useCases);
+            spin.stop();
+
+            if (options.json) {
+                console.log(JSON.stringify(rec, null, 2));
+                return;
+            }
+
+            ui.sectionHeader('Stack Recommendation');
+            ui.keyValue('Product', rec.product_summary);
+            ui.keyValue('LLM', rec.recommended_llm);
+            console.log(ui.DIM('    ' + rec.llm_reason));
+
+            if (rec.recommended_agents && rec.recommended_agents.length > 0) {
+                console.log('');
+                console.log(ui.ACCENT('    Recommended Agents:'));
+                rec.recommended_agents.forEach(a => {
+                    console.log(`      ${ui.SUCCESS('+')} ${chalk.white(a.icon + ' ' + a.name)}`);
+                    console.log(ui.DIM(`          Role: ${a.role_in_flow}`));
+                    console.log(ui.DIM(`          Why:  ${a.reason}`));
+                });
+            }
+
+            if (rec.recommended_tools && rec.recommended_tools.length > 0) {
+                console.log('');
+                console.log(ui.ACCENT('    Recommended Tools:'));
+                rec.recommended_tools.forEach(t => {
+                    console.log(`      ${ui.SUCCESS('+')} ${chalk.white(t.icon + ' ' + t.name)}`);
+                    console.log(ui.DIM(`          Used by: ${t.used_by_agent}  —  ${t.reason}`));
+                });
+            }
+
+            if (rec.action_plan && rec.action_plan.length > 0) {
+                console.log('');
+                console.log(ui.ACCENT('    Action Plan:'));
+                rec.action_plan.forEach(step => {
+                    console.log(`      ${chalk.white('Step ' + step.step + ':')} ${chalk.white(step.title)}`);
+                    console.log(ui.DIM(`          ${step.description}`));
+                    if (step.agents && step.agents.length > 0)
+                        console.log(ui.DIM(`          Agents: ${step.agents.join(', ')}`));
+                    if (step.tools && step.tools.length > 0)
+                        console.log(ui.DIM(`          Tools:  ${step.tools.join(', ')}`));
+                    console.log(ui.DIM(`          → ${step.expected_output}`));
+                });
+            }
+
+            // Build "try it now" command from recommended agents/tools
+            const agentSlugs = (rec.recommended_agents || []).map(a => a.slug).join(',');
+            const toolSlugs  = (rec.recommended_tools  || []).map(t => t.slug).join(',');
+            console.log('');
+            console.log(ui.ACCENT('    Try It Now:'));
+            let tryCmd = `namango run "your task here"`;
+            if (agentSlugs) tryCmd += ` \\\n      --agents ${agentSlugs}`;
+            if (toolSlugs)  tryCmd += ` \\\n      --tools ${toolSlugs}`;
+            console.log('      ' + chalk.cyan(tryCmd));
+
+            if (rec.api_snippet) {
+                console.log('');
+                console.log(ui.ACCENT('    API Snippet:'));
+                rec.api_snippet.split('\n').forEach(line => {
+                    console.log(ui.DIM('      ' + line));
+                });
+            }
+
+            console.log('');
+        } catch (e) {
+            spin.fail(ui.ERR('Stack recommendation failed: ' + e.message));
+        }
+    });
+
+// ─── STACKS ───────────────────────────────────────────────────────────────────
+
+program
+    .command('stacks')
+    .description('Browse curated community stacks — pre-built agent+tool configurations')
+    .action(async () => {
+        config.requireAuth();
+
+        const CURATED = [
+            {
+                name: 'competitor-monitor',
+                description: 'Monitor competitor pricing pages daily, alert on changes',
+                agents: 'research, code',
+                tools: 'web_scrape, web_search',
+                cost: '~$0.004/day (10 competitors)',
+            },
+            {
+                name: 'github-explorer',
+                description: 'Research, rank, and summarize open-source repos for a topic',
+                agents: 'github_librarian',
+                tools: 'github_repo_info, github_search_and_rank',
+                cost: '~$0.001/query',
+            },
+            {
+                name: 'content-researcher',
+                description: 'Deep research on any topic with cited sources',
+                agents: 'research',
+                tools: 'web_scrape, web_search',
+                cost: '~$0.002/query',
+            },
+            {
+                name: 'code-reviewer',
+                description: 'Review a GitHub repo for bugs, security issues, and improvements',
+                agents: 'code',
+                tools: 'github_repo_info, web_search',
+                cost: '~$0.003/review',
+            },
+        ];
+
+        ui.sectionHeader('Community Stacks');
+        ui.table(
+            ['Stack', 'What It Does', 'Agents', 'Tools', 'Est. Cost'],
+            CURATED.map(s => [
+                chalk.white(s.name),
+                ui.DIM(s.description.slice(0, 45) + (s.description.length > 45 ? '…' : '')),
+                ui.ACCENT(s.agents),
+                ui.DIM(s.tools),
+                ui.SUCCESS(s.cost),
+            ])
+        );
+        console.log(ui.DIM('  Build your own:'));
+        console.log('  ' + chalk.cyan('namango design "describe your product"'));
+        console.log('');
     });
 
 // ─── ARCHITECT ────────────────────────────────────────────────────────────────
@@ -304,7 +482,6 @@ program
     .option('--json', 'Output raw JSON')
     .action(async (descWords, options) => {
         config.requireAuth();
-        const apiKey = config.get().apiKey;
         let description = descWords.join(' ');
 
         if (!description) {
@@ -336,7 +513,8 @@ program
 
         const spin = ui.spinner('Solutions Architect is designing your architecture...');
         try {
-            const arch = await api.architect(description, options.optimize, apiKey);
+            // api_key no longer passed in body — sent as X-API-Key header by api.request()
+            const arch = await api.architect(description, options.optimize);
             spin.stop();
 
             if (options.json) {
@@ -368,6 +546,12 @@ program
 
             console.log(ui.ACCENT('    Rationale:'));
             console.log(ui.DIM('      ' + arch.explanation));
+            console.log('');
+
+            const agentHint = (arch.recommended_agents || []).slice(0, 2).join(',');
+            console.log(ui.ACCENT('    Try It Now:'));
+            console.log('      ' + chalk.cyan(`namango run "your task here"${agentHint ? ' --agents ' + agentHint : ''}`));
+            console.log('      ' + chalk.cyan(`namango design "${(description || 'your product').slice(0, 50)}"`));
             console.log('');
 
             const { scaffold } = await inquirer.prompt([{
@@ -498,15 +682,29 @@ program
 
             ui.sectionHeader(`Recent Requests (${data.items.length})`);
             ui.table(
-                ['Prompt', 'Model', 'Category', 'Latency', 'Status'],
+                ['Prompt', 'Model', 'Category', 'Cost', 'Latency', 'Status'],
                 data.items.map(item => [
-                    chalk.white((item.prompt || '').slice(0, 50) + (item.prompt && item.prompt.length > 50 ? '...' : '')),
+                    chalk.white((item.prompt || '').slice(0, 40) + (item.prompt && item.prompt.length > 40 ? '...' : '')),
                     ui.DIM(item.selected_llm || '-'),
                     ui.ACCENT(item.task_category || '-'),
+                    item.cost_usd != null ? ui.DIM('$' + Number(item.cost_usd).toFixed(6)) : ui.DIM('-'),
                     ui.DIM(item.latency_ms ? item.latency_ms + 'ms' : '-'),
                     item.status === 'completed' ? ui.SUCCESS(item.status) : ui.ERR(item.status),
                 ])
             );
+
+            // Cumulative savings footer
+            const completed = data.items.filter(i => i.status === 'completed' && i.cost_usd != null);
+            if (completed.length > 0) {
+                const totalCost = completed.reduce((s, i) => s + Number(i.cost_usd), 0);
+                // Estimate GPT-4o cost: assume avg 500 input + 500 output tokens per request
+                const avgTokens = 500;
+                const gpt4oEquiv = completed.length * ((avgTokens * GPT4O_INPUT_PER_TOKEN) + (avgTokens * GPT4O_OUTPUT_PER_TOKEN));
+                const savedPct = gpt4oEquiv > 0 ? ((gpt4oEquiv - totalCost) / gpt4oEquiv * 100) : 0;
+                console.log(`    ${ui.DIM('Total cost:')}   ${chalk.white('$' + totalCost.toFixed(6))}`);
+                console.log(`    ${ui.DIM('GPT-4o equiv:')} ${chalk.white('$' + gpt4oEquiv.toFixed(4))} ${ui.DIM('(estimated, 500 tok avg)')}`);
+                console.log(`    ${ui.DIM('You saved:')}    ${chalk.green(savedPct.toFixed(1) + '%')} ${ui.DIM('vs GPT-4o direct')}`);
+            }
             console.log('');
         } catch (e) {
             spin.fail(ui.ERR(e.message));
@@ -530,12 +728,14 @@ program
                 name: 'action',
                 message: chalk.cyan('What would you like to do?'),
                 choices: [
+                    { name: `${chalk.white('Design Stack')}        ${ui.DIM('— Describe product → recommended stack')}`, value: 'design' },
+                    { name: `${chalk.white('Run a Prompt')}        ${ui.DIM('— Send query to gateway')}`, value: 'run' },
+                    new inquirer.Separator(),
                     { name: `${chalk.white('Browse Agents')}       ${ui.DIM('— View all AI agents')}`, value: 'agents' },
                     { name: `${chalk.white('Browse Tools')}        ${ui.DIM('— View tools & MCPs')}`, value: 'tools' },
                     { name: `${chalk.white('Browse LLMs')}         ${ui.DIM('— View models & pricing')}`, value: 'llms' },
                     { name: `${chalk.white('Browse Repos')}        ${ui.DIM('— Trending AI open source')}`, value: 'repos' },
                     new inquirer.Separator(),
-                    { name: `${chalk.white('Run a Prompt')}        ${ui.DIM('— Send query to gateway')}`, value: 'run' },
                     { name: `${chalk.white('Architect')}           ${ui.DIM('— Design product architecture')}`, value: 'architect' },
                     { name: `${chalk.white('View History')}        ${ui.DIM('— Recent requests')}`, value: 'history' },
                     new inquirer.Separator(),
@@ -590,6 +790,42 @@ program
                     );
                 }
 
+                if (action === 'design') {
+                    const { description } = await inquirer.prompt([{
+                        type: 'input',
+                        name: 'description',
+                        message: chalk.cyan('What are you building?'),
+                        validate: input => input.length > 10 ? true : 'Please describe in more detail',
+                    }]);
+                    const spin = ui.spinner('Designing your optimal AI stack...');
+                    const rec = await api.recommend(description, []);
+                    spin.stop();
+                    ui.sectionHeader('Stack Recommendation');
+                    ui.keyValue('Product', rec.product_summary);
+                    ui.keyValue('LLM', rec.recommended_llm);
+                    if (rec.recommended_agents && rec.recommended_agents.length > 0) {
+                        console.log(ui.ACCENT('\n    Agents:'));
+                        rec.recommended_agents.forEach(a => {
+                            console.log(`      ${ui.SUCCESS('+')} ${chalk.white(a.icon + ' ' + a.name)}`);
+                            console.log(ui.DIM(`          ${a.role_in_flow}`));
+                        });
+                    }
+                    if (rec.recommended_tools && rec.recommended_tools.length > 0) {
+                        console.log(ui.ACCENT('\n    Tools:'));
+                        rec.recommended_tools.forEach(t => {
+                            console.log(`      ${ui.SUCCESS('+')} ${chalk.white(t.icon + ' ' + t.name)} ${ui.DIM('— ' + t.reason)}`);
+                        });
+                    }
+                    const agentSlugs = (rec.recommended_agents || []).map(a => a.slug).join(',');
+                    const toolSlugs  = (rec.recommended_tools  || []).map(t => t.slug).join(',');
+                    console.log(ui.ACCENT('\n    Try It Now:'));
+                    let tryCmd = `namango run "your task here"`;
+                    if (agentSlugs) tryCmd += ` --agents ${agentSlugs}`;
+                    if (toolSlugs)  tryCmd += ` --tools ${toolSlugs}`;
+                    console.log('      ' + chalk.cyan(tryCmd));
+                    console.log('');
+                }
+
                 if (action === 'run') {
                     const { prompt } = await inquirer.prompt([{
                         type: 'input',
@@ -606,7 +842,9 @@ program
                     ui.keyValue('LLM', res.orchestration.selected_llm);
                     ui.keyValue('Category', res.orchestration.task_category);
                     ui.keyValue('Latency', res.usage.latency_ms + 'ms');
-                    ui.keyValue('Cost', '$' + res.usage.cost_usd.toFixed(6));
+                    const gpt4oCost = ((res.usage.input_tokens || 0) * GPT4O_INPUT_PER_TOKEN) + ((res.usage.output_tokens || 0) * GPT4O_OUTPUT_PER_TOKEN);
+                    const savedPct = gpt4oCost > 0 ? (((gpt4oCost - res.usage.cost_usd) / gpt4oCost) * 100).toFixed(1) : '0.0';
+                    ui.keyValue('Cost', '$' + res.usage.cost_usd.toFixed(6) + chalk.green(`  (saved ${savedPct}% vs GPT-4o)`));
                     console.log('');
                 }
 
@@ -616,7 +854,7 @@ program
                         { type: 'list', name: 'optimization', message: 'Optimize for:', choices: [{ name: 'Cost-Effective', value: 'cost' }, { name: 'Highest Quality', value: 'quality' }] },
                     ]);
                     const spin = ui.spinner('Designing architecture...');
-                    const arch = await api.architect(answers.description, answers.optimization, config.get().apiKey);
+                    const arch = await api.architect(answers.description, answers.optimization);
                     spin.stop();
                     ui.sectionHeader('Architecture');
                     ui.keyValue('Framework', arch.framework);
@@ -652,9 +890,16 @@ program
 program
     .command('init [project-name]')
     .description('Scaffold a new project (shortcut: runs architect + scaffold)')
-    .action(async (projectName) => {
+    .action(async () => {
+        // program.parse() cannot be called recursively in commander v10+.
+        // Instead, run the architect command handler directly via execFileSync.
+        const { execFileSync } = require('child_process');
         console.log(ui.DIM('\n  Redirecting to `namango architect` ...\n'));
-        program.parse(['node', 'namango', 'architect']);
+        try {
+            execFileSync(process.execPath, [process.argv[1], 'architect'], { stdio: 'inherit' });
+        } catch (e) {
+            // execFileSync throws on non-zero exit; child already printed the error
+        }
     });
 
 program.parse(process.argv);

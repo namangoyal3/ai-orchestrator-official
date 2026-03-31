@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Bell, Settings, Search } from "lucide-react";
+import Link from "next/link";
+import { Bell, Settings } from "lucide-react";
 
 interface HeaderProps {
   title: string;
@@ -15,12 +15,14 @@ export default function Header({ title, subtitle }: HeaderProps) {
         {subtitle && <p className="text-slate-400 text-xs">{subtitle}</p>}
       </div>
       <div className="flex items-center gap-3">
-        <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+        <Link href="/analytics" title="View analytics"
+          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
           <Bell size={18} />
-        </button>
-        <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+        </Link>
+        <Link href="/api-keys" title="Manage API keys"
+          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
           <Settings size={18} />
-        </button>
+        </Link>
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
           D
         </div>

@@ -60,12 +60,16 @@ app.add_middleware(
 )
 
 
-# Global error handler
+# Global error handler — log internally, never expose detail to clients
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    import logging
+    logging.getLogger("uvicorn.error").exception(
+        "Unhandled exception for %s %s", request.method, request.url.path
+    )
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)},
+        content={"error": "Internal server error"},
     )
 
 

@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { LayoutDashboard, Terminal, Bot, Wrench, Key, ChartBar as BarChart3, Zap, ExternalLink, ChevronRight, Radio, Store } from "lucide-react";
 import clsx from "clsx";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, getApiKey } from "@/lib/api";
 
 const MAIN_NAV = [
   { href: "/",            label: "Dashboard",   icon: LayoutDashboard },
@@ -65,6 +66,15 @@ function NavItem({ href, label, icon: Icon, badge, active, isDashboard }: NavIte
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [activeKey, setActiveKey] = useState("");
+
+  useEffect(() => {
+    setActiveKey(getApiKey());
+  }, []);
+
+  const keyDisplay = activeKey && activeKey !== "gw-demo-key-change-in-production-12345678"
+    ? activeKey.slice(0, 14) + "••••"
+    : "Not set — visit API Keys";
 
   return (
     <aside className="fixed left-0 top-0 h-full w-[260px] bg-slate-900 border-r border-slate-800 flex flex-col z-40">
@@ -146,10 +156,10 @@ export default function Sidebar() {
           </span>
         </a>
 
-        <div className="px-3 py-2 bg-slate-800/40 rounded-lg border border-slate-800">
-          <div className="text-[10px] text-slate-600 uppercase tracking-wide font-medium mb-1">Demo API Key</div>
-          <div className="text-xs text-slate-500 font-mono truncate">gw-demo-key-change-...</div>
-        </div>
+        <Link href="/api-keys" className="px-3 py-2 bg-slate-800/40 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors block">
+          <div className="text-[10px] text-slate-600 uppercase tracking-wide font-medium mb-1">Active API Key</div>
+          <div className="text-xs text-slate-500 font-mono truncate">{keyDisplay}</div>
+        </Link>
       </div>
     </aside>
   );
