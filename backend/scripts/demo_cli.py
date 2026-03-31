@@ -687,7 +687,8 @@ def main() -> None:
     # Interactive prompt if nothing given
     if not args.prompt:
         print(f"\n{CYAN}  Namango Gateway — AI Product Builder{R}")
-        print(f"  {DIM}Describe what you want to build and the gateway will generate it.{R}\n")
+        print(f"  {DIM}Be specific about what to build and for what domain.{R}")
+        print(f"  {DIM}Example: build a customer support helpdesk for a Zomato-like food delivery app{R}\n")
         try:
             args.prompt = input(f"  {BOLD}What do you want to build?{R}  ").strip()
         except (KeyboardInterrupt, EOFError):
@@ -705,10 +706,16 @@ def main() -> None:
         "prompt":  (
             f"Write a single, complete, fully-implemented Python file for the following:\n\n"
             f"{args.prompt}\n\n"
+            "Make the code domain-specific — use realistic data models, field names, "
+            "business logic, and seed data that match the described domain exactly. "
+            "For example if it's for a food delivery app, use orders, restaurants, "
+            "delivery partners, and food items. If it's for a hospital, use patients, "
+            "doctors, appointments. Mirror the real domain throughout.\n\n"
             "REQUIREMENTS:\n"
             "- Single file, fully implemented — no stubs, no `pass`, no `# TODO`\n"
             "- Start with an ASCII architecture diagram as a comment block\n"
             "- Every function must contain real, working code\n"
+            "- Seed data must use realistic names/values from the described domain\n"
             "- Include a runnable demo / main block at the bottom\n"
             "- Use only stdlib + httpx + rich (no other dependencies)\n"
         ),
