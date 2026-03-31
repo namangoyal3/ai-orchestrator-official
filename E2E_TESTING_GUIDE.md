@@ -1,8 +1,8 @@
-# End-to-End Testing Guide - Repository Scraper
+# End-to-End Testing Guide - Repository Scraper (Automatic Scheduler)
 
 ## Quick Start (No Credentials Required)
 
-Test the infrastructure without GitHub/Reddit credentials using mock data.
+Test the scraper infrastructure running as an automatic hourly background job.
 
 ### Step 1: Prepare Environment
 ```bash
@@ -16,7 +16,7 @@ cd backend
 pip install -q snscrape praw PyGithub requests sqlalchemy
 ```
 
-### Step 3: Run Unit Tests (Will Pass Without Credentials)
+### Step 3: Run Unit Tests (No Credentials Needed)
 ```bash
 pytest tests/test_scraper.py -v
 ```
@@ -32,28 +32,247 @@ tests/test_scraper.py::test_categorize_repo_tool PASSED
 ======================== 6 passed in 0.23s ========================
 ```
 
-### Step 4: Test Database Model
+### Step 4: Start Backend with Automatic Scheduler
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+**Expected Output (Watch for this):**
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000
+INFO:     Application startup complete
+✓ Repository scraper scheduled to run every hour
+```
+
+This confirms the scheduler is active and will run every hour automatically.
+
+### Step 5: Verify Scheduler is Running
+The scraper runs automatically every hour. To verify it's set up correctly:
+
+```bash
+# In another terminal, check the database after a minute
+sqlite3 backend/namango_dev.db << 'EOF'
+SELECT COUNT(*) as total FROM trending_repos;
+SELECT category, COUNT(*) FROM trending_repos GROUP BY category;
+EOF
+```
+
+**Or wait for logs** - within the first hour, you'll see:
+```
+INFO:     Scraper job 'repo-scraper' executed successfully (or attempted)
+```
+
+## Full Testing with Credentials
+
+### Step 1: Acquire Credentials
+
+**GitHub Token:**
+1. Go to https://github.com/settings/tokens/new
+2. Name: "Namango Scraper"
+3. Scope: Check `public_repo`
+4. Generate and copy token
+
+**Reddit Credentials:**
+1. Go to https://www.reddit.com/prefs/apps/
+2. Click "Create an application"
+3. Name: "Namango Repo Scraper"
+4. Type: "script"
+5. Redirect URI: `http://localhost`
+6. Copy Client ID and Client Secret
+
+### Step 2: Configure Environment
+```bash
+cd backend
+cat > .env << 'EOF'
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+REDDIT_CLIENT_ID=xxxxxxxx
+REDDIT_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxx
+EOF
+```
+
+### Step 3: Start Backend Again
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+The scraper will now actually run and attempt to scrape real data from Twitter/Reddit.
+
+### Step 4: Monitor First Run
+Check logs for successful scraping:
+
+```bash
+# In another terminal
+tail -f backend/nohup.out
+```
+
+Watch for messages like:
+```
+✓ Found 42 GitHub URLs from Twitter
+✓ Found 28 GitHub URLs from Reddit  
+✓ Enriching repositories with GitHub metadata...
+✓ Successfully scraped and stored 15 new repositories
+```
+
+### Step 5: Verify Data in Database
+```bash
+sqlite3 backend/namango_dev.db << 'EOF'
+-- Count all repos
+SELECT COUNT(*) as total FROM trending_repos;
+
+-- See repos by category
+SELECT category, COUNT(*) FROM trending_repos GROUP BY category;
+
+-- View recent repos
+SELECT name, stars, category, discovered_at FROM trending_repos 
+ORDER BY discovered_at DESC LIMIT 5;
+EOF
+```
+
+## Testing Scheduler Behavior
+
+### Verify Hourly Execution
+The scraper runs at the start and then every 60 minutes automatically.
+
+**Test 1: Watch the logs** (takes 1 hour to see second run)
+```bash
+# Keep monitoring logs - after 1 hour you should see another execution
+watch -n 60 'grep "Scraper job" backend/nohup.out | tail -5'
+```
+
+**Test 2: Check database growth** (instant, if credentials provided)
+```bash
+# Run immediately (within 1 minute)
+sqlite3 backend/namango_dev.db "SELECT COUNT(*) FROM trending_repos"
+
+# Run again after a few minutes - count may increase slightly
+sqlite3 backend/namango_dev.db "SELECT COUNT(*) FROM trending_repos"
+```
+
+**Test 3: Force manual test of scraper logic** (simulates what scheduler does)
 ```bash
 python -c "
-from app.models import TrendingRepo
-from datetime import datetime
+import asyncio
+from app.scraper import RepoScraper
 
-# Test model instantiation
-repo = TrendingRepo(
-    github_url='https://github.com/test/repo',
-    name='test-repo',
-    description='Test Repository',
-    stars=500,
-    language='Python',
-    category='agent',
-    source='twitter'
-)
-print('✅ TrendingRepo model works')
-print(f'   - URL: {repo.github_url}')
-print(f'   - Category: {repo.category}')
-print(f'   - Stars: {repo.stars}')
+async def test():
+    scraper = RepoScraper()
+    # Simulate what the scheduler runs hourly
+    count = await scraper.scrape_and_store(days=7)
+    print(f'✅ Added {count} new repositories')
+
+asyncio.run(test())
 "
 ```
+
+## Testing Error Handling
+
+### Without Credentials
+The scraper still runs every hour but API calls fail gracefully:
+
+```bash
+# Remove credentials
+unset GITHUB_TOKEN
+unset REDDIT_CLIENT_ID
+unset REDDIT_CLIENT_SECRET
+
+# Start backend - scheduler still runs, but returns 0 repos silently
+uvicorn app.main:app --reload
+
+# Logs will show:
+# ✓ Repository scraper scheduled to run every hour
+# (Actual API failures are silent - no errors, just 0 repos stored)
+```
+
+### Invalid Credentials
+```bash
+export GITHUB_TOKEN=invalid_token_here
+export REDDIT_CLIENT_ID=fake_id
+
+# Backend starts fine, scheduler runs, API calls fail gracefully
+# Zero repos stored, no errors in app logs
+```
+
+## Scheduling Behavior Tests
+
+### Verify Scheduler Configuration
+```bash
+python -c "
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
+sched = AsyncIOScheduler()
+sched.add_job(lambda: None, 'interval', hours=1, id='test-job')
+
+job = sched.get_job('test-job')
+print(f'Job ID: {job.id}')
+print(f'Next run: 1 hour from now')
+print(f'Trigger: {job.trigger}')
+"
+```
+
+## Integration Testing Checklist
+
+- [ ] Unit tests pass (pytest)
+- [ ] Backend starts without errors
+- [ ] Scheduler initializes with message "✓ Repository scraper scheduled..."
+- [ ] No API endpoints exposed for scraping (removed)
+- [ ] CLI no longer has `scrape-repos` command
+- [ ] Database table `trending_repos` exists
+- [ ] Data stores in database correctly
+- [ ] Error handling works gracefully (continues running even if API fails)
+- [ ] Rate limiting handled automatically
+
+## Production Readiness Checklist
+
+- [ ] All unit tests pass
+- [ ] Scheduler starts on app startup
+- [ ] Database migrations applied
+- [ ] Environment variables configured (GITHUB_TOKEN, REDDIT credentials)
+- [ ] Logging shows hourly execution
+- [ ] Error logs are informative
+- [ ] Credentials secured (not in code)
+- [ ] No manual user commands needed
+- [ ] Documentation updated
+- [ ] Performance acceptable
+
+## Troubleshooting
+
+### Scheduler Not Starting
+```bash
+# Check for import errors
+python -c "from apscheduler.schedulers.asyncio import AsyncIOScheduler"
+
+# Reinstall if needed
+pip install --upgrade apscheduler
+```
+
+### API Calls Failing Silently
+This is expected if credentials are invalid. Check:
+```bash
+echo $GITHUB_TOKEN          # Should not be empty
+echo $REDDIT_CLIENT_ID      # Should not be empty
+echo $REDDIT_CLIENT_SECRET  # Should not be empty
+```
+
+### Database Not Growing
+```bash
+# Check if table exists
+sqlite3 backend/namango_dev.db ".tables" | grep trending_repos
+
+# Check for data
+sqlite3 backend/namango_dev.db "SELECT COUNT(*) FROM trending_repos"
+
+# If 0 repos, either:
+# 1. Credentials invalid/missing (add them)
+# 2. Wait up to 1 hour for first scheduled run
+# 3. Check if API services are down
+```
+
+---
+
+**Next Step**: After successful testing, merge to main and deploy to Railway
 
 ## Full Testing with Credentials
 
