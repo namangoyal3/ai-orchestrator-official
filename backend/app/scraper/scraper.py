@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import snscrape.modules.twitter as sntwitter
-import praw
+import snscrape.modules.reddit as snreddit
 from github import Github
 from sqlalchemy.orm import Session
 
@@ -20,11 +20,6 @@ class RepoScraper:
         
         # Initialize clients
         self.github = Github(os.getenv('GITHUB_TOKEN'))
-        self.reddit = praw.Reddit(
-            client_id=os.getenv('REDDIT_CLIENT_ID'),
-            client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
-            user_agent='RepoScraper/1.0'
-        )
     
     def scrape_twitter(self, days: int = 7) -> List[str]:
         """Scrape GitHub URLs from Twitter."""
@@ -44,25 +39,26 @@ class RepoScraper:
         return list(set(urls))  # Deduplicate
     
     def scrape_reddit(self, days: int = 7) -> List[str]:
-        """Scrape GitHub URLs from Reddit."""
+        """Scrape GitHub URLs from Reddit using snscrape."""
         urls = []
-        since_timestamp = time.time() - (days * 24 * 60 * 60)
+        since_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
         
         for sub in self.reddit_sources:
             try:
-                subreddit = self.reddit.subreddit(sub)
-                for post in subreddit.new(limit=100):
-                    if post.created_utc > since_timestamp:
-                        # Check post content and comments
-                        content = post.selftext + ' ' + (post.url if 'github.com' in post.url else '')
-                        github_urls = re.findall(r'https://github\.com/[^\s\n]+', content)
+                query = f'subreddit:{sub} since:{since_date}'
+                scraper = snreddit.RedditSubredditScraper(sub)
+                
+                for post in scraper.get_items():
+                    if hasattr(post, 'url') and post.url:
+                        # Check post URL
+                        if 'github.com' in post.url:
+                            urls.append(post.url)
+                    
+                    # Check post content
+                    if hasattr(post, 'selftext') and post.selftext:
+                        github_urls = re.findall(r'https://github\.com/[^\s\n]+', post.selftext)
                         urls.extend(github_urls)
                         
-                        # Check top comments
-                        post.comments.replace_more(limit=0)
-                        for comment in post.comments[:10]:  # Top 10 comments
-                            github_urls = re.findall(r'https://github\.com/[^\s\n]+', comment.body)
-                            urls.extend(github_urls)
             except Exception as e:
                 print(f"Error scraping Reddit subreddit {sub}: {e}")
         

@@ -21,10 +21,6 @@ Create or update environment variables in your deployment:
 ```bash
 # GitHub Token (https://github.com/settings/tokens)
 GITHUB_TOKEN=your_token_here
-
-# Reddit App (https://www.reddit.com/prefs/apps)
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
 ```
 
 ### 2. Deploy
