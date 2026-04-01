@@ -29,6 +29,10 @@ STACK_CATALOG: dict[str, list[dict]] = {
         {"slug": "hono",      "name": "Hono",        "description": "Ultra-fast web framework for edge runtimes",      "tier": "free",     "monthly_cost_usd": 0, "category": "web"},
         {"slug": "trpc",      "name": "tRPC",        "description": "End-to-end type-safe APIs without schemas",       "tier": "free",     "monthly_cost_usd": 0, "category": "web"},
         {"slug": "astro",     "name": "Astro",       "description": "Static site builder with island architecture",    "tier": "free",     "monthly_cost_usd": 0, "category": "web"},
+        {"slug": "react",     "name": "React",       "description": "UI library for building component-based frontends","tier": "free",     "monthly_cost_usd": 0, "category": "web"},
+        {"slug": "tailwind",  "name": "Tailwind CSS","description": "Utility-first CSS framework, pairs with any JS framework","tier": "free","monthly_cost_usd": 0,"category": "web"},
+        {"slug": "shadcn",    "name": "shadcn/ui",   "description": "Copy-paste accessible React components built on Radix","tier": "free","monthly_cost_usd": 0,"category": "web"},
+        {"slug": "vite",      "name": "Vite",        "description": "Fast frontend build tool and dev server for React/Vue","tier": "free","monthly_cost_usd": 0,"category": "web"},
     ],
     "database": [
         {"slug": "postgresql",  "name": "PostgreSQL",   "description": "Reliable open-source relational database",            "tier": "free",     "monthly_cost_usd": 0,  "category": "database"},

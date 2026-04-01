@@ -57,6 +57,10 @@ STACK_CATALOG: dict[str, list[dict]] = {
         {"slug": "express",  "name": "Express.js", "description": "Minimal, flexible Node.js web framework",        "tier": "free",     "monthly_cost_usd": 0,  "category": "web"},
         {"slug": "nextjs",   "name": "Next.js",    "description": "React framework with SSR and API routes",        "tier": "free",     "monthly_cost_usd": 0,  "category": "web"},
         {"slug": "flask",    "name": "Flask",      "description": "Lightweight Python web microframework",          "tier": "free",     "monthly_cost_usd": 0,  "category": "web"},
+        {"slug": "react",    "name": "React",      "description": "UI library for building component-based frontends", "tier": "free",     "monthly_cost_usd": 0,  "category": "web"},
+        {"slug": "tailwind", "name": "Tailwind CSS","description": "Utility-first CSS framework, pairs with any JS framework","tier": "free","monthly_cost_usd": 0,"category": "web"},
+        {"slug": "shadcn",   "name": "shadcn/ui",  "description": "Copy-paste accessible React components built on Radix","tier": "free","monthly_cost_usd": 0, "category": "web"},
+        {"slug": "vite",     "name": "Vite",       "description": "Fast frontend build tool and dev server for React/Vue", "tier": "free","monthly_cost_usd": 0, "category": "web"},
     ],
     "database": [
         {"slug": "postgresql",  "name": "PostgreSQL",  "description": "Reliable open-source relational database",           "tier": "free",     "monthly_cost_usd": 0,  "category": "database"},
@@ -751,14 +755,15 @@ def select_tools(
     """
     all_tools = _flatten_catalog(catalog)
 
-    # Build prompt lines: send up to 35 tools, one per line, with category + tier
+    # Build prompt lines: send full catalog, one per line, with category + tier + oss flag
     prompt_lines: list[str] = []
-    for t in all_tools[:35]:
+    for t in all_tools:
         cat   = t.get("category", "?")
         name  = t.get("name", t.get("slug", "?"))
         desc  = (t.get("description") or "")[:65]
         tier  = t.get("tier", "free")
-        prompt_lines.append(f"[{cat}] {name}: {desc} (tier={tier})")
+        oss   = " [OSS]" if tier == "free" else ""
+        prompt_lines.append(f"[{cat}] {name}: {desc} (tier={tier}{oss})")
 
     # Build product context block
     ctx_block = ""
@@ -797,7 +802,8 @@ def select_tools(
         f"2. Coherence — tools must compose well together (no ORM that fights your database, no queue that conflicts with your framework)\n"
         f"3. Context-driven — the product type, scale, team size, and deployment model must drive every choice\n"
         f"4. OSS-first — prefer free/open-source unless the product context demands otherwise\n"
-        f"5. Must-haves: at minimum one web framework, one database, and one deployment tool\n\n"
+        f"5. Must-haves: you MUST cover all five layers — frontend, backend, database, auth, notifications\n"
+        f"   If the product has no frontend (API-only), skip it. Otherwise include all five.\n\n"
         f"CONTEXT-SPECIFIC RULES:\n"
         f"- SEO required → prefer Next.js (SSR) over React SPA\n"
         f"- Container/self-hosted deployment → include Docker\n"
@@ -805,14 +811,17 @@ def select_tools(
         f"- MVP/prototype scale → SQLite or Supabase over a self-hosted PostgreSQL cluster\n"
         f"- High scale → PostgreSQL + Redis + a message queue\n"
         f"- B2B SaaS → include an auth solution with RBAC\n"
-        f"- Payment required → Stripe (global) or Razorpay (India)\n\n"
+        f"- Payment required → Stripe (global) or Razorpay (India)\n"
+        f"- Notifications → Resend or SendGrid for email; Novu for multi-channel; Firebase FCM for push\n"
+        f"- Frontend → Next.js (SSR/SEO) or React + Vite (SPA); always pair with Tailwind CSS\n"
+        f"- OSS-first for demos → prefer tools marked [OSS] when capability is equivalent\n\n"
         f"{ctx_block}"
         f"PRODUCT TO BUILD: {user_prompt}\n\n"
         f"AVAILABLE STACK CATALOG:\n"
         + "\n".join(prompt_lines)
         + (f"\n\n{mp_block}" if mp_block else "")
-        + f"\n\nSelect 5-8 tools that form a complete, production-ready stack for this specific product.\n"
-        f"For each tool, write a reason that is specific to THIS product — not a generic description.\n"
+        + f"\n\nSelect 6-10 tools covering ALL five layers: frontend, backend, database, auth, notifications.\n"
+        f"Prefer [OSS] tools. For each tool, write a reason specific to THIS product — not generic.\n"
         f"Reply with ONLY a JSON array, no markdown, no explanation:\n"
         f'[{{"name":"<exact name from catalog>", "category":"<category>", '
         f'"tier":"free|freemium|paid", "reason":"one sentence — why this tool specifically for this product and context"}}]'
@@ -1016,17 +1025,51 @@ def _build_blueprint_prompt(
         f"  {user_prompt}\n\n"
         f"{ctx_section}"
         f"SELECTED STACK ({tier_label}):\n{tool_list}\n\n"
+        f"IMPORTANT: The blueprint MUST cover all five layers explicitly:\n"
+        f"  1. Frontend  — UI framework, component library, styling\n"
+        f"  2. Backend   — API/server framework, business logic\n"
+        f"  3. Database  — primary store, migrations, ORM/query layer\n"
+        f"  4. Auth      — login, session management, RBAC\n"
+        f"  5. Notifications — email, push, or in-app alerts (pick what fits)\n"
+        f"If the selected stack is missing any layer, add the best OSS option for it.\n\n"
         f"{agents_section}"
         f"{confirmed_section}"
         f"Produce output with EXACTLY these sections in order:\n\n"
         f"## Architecture Diagram\n"
-        f"Draw an ASCII box diagram showing how {tool_names} connect.\n"
+        f"Draw an ASCII box diagram showing how all layers connect.\n"
         f"Show data flow with arrows (→). Group related services with boxes.\n"
         f"Keep it 60 characters wide. Be specific to the domain (e.g., for food delivery:\n"
         f"show Order Service, Rider Assignment, Customer Notifications).\n\n"
         f"## Why This Stack\n"
         f"For each selected tool, write exactly 1-2 sentences:\n"
-        f"what it does in THIS specific application, not in general.\n\n"
+        f"what it does in THIS specific application, not in general.\n"
+        f"Group under sub-headers: ### Frontend, ### Backend, ### Database, ### Auth, ### Notifications.\n\n"
+        f"## Project Structure\n"
+        f"Show the recommended folder/file tree using a code block. Example format:\n"
+        f"```\n"
+        f"project-name/\n"
+        f"├── frontend/          # UI layer\n"
+        f"│   ├── src/\n"
+        f"│   │   ├── components/\n"
+        f"│   │   ├── pages/\n"
+        f"│   │   └── lib/\n"
+        f"│   └── package.json\n"
+        f"├── backend/           # API layer\n"
+        f"│   ├── app/\n"
+        f"│   │   ├── routes/\n"
+        f"│   │   ├── models/\n"
+        f"│   │   └── services/\n"
+        f"│   └── requirements.txt\n"
+        f"└── docker-compose.yml\n"
+        f"```\n"
+        f"Adapt structure to the actual stack chosen. Add comments for non-obvious folders.\n\n"
+        f"## Getting Started\n"
+        f"Exactly 3 steps to go from zero to running app:\n"
+        f"```bash\n"
+        f"# Step 1: Install dependencies\n"
+        f"# Step 2: Configure environment\n"
+        f"# Step 3: Run the app\n"
+        f"```\n\n"
         + (
             f"## Marketplace Integrations\n"
             f"For each confirmed marketplace pick, explain exactly how it wires into the stack:\n"
@@ -1053,9 +1096,10 @@ def _build_blueprint_prompt(
         f"## What This Project Does\n"
         f"2 sentences describing the product — domain-specific, not generic.\n\n"
         f"## Tech Stack\n"
-        f"For each tool: what it does in this project specifically.\n\n"
+        f"List each tool grouped by layer (Frontend / Backend / Database / Auth / Notifications).\n"
+        f"For each: what it does in this project specifically.\n\n"
         f"## Architecture\n"
-        f"How data flows between the services. Reference the actual domain entities.\n\n"
+        f"How data flows between the layers. Reference the actual domain entities.\n\n"
         f"## Architecture Decisions\n"
         f"For each major tool choice, document exactly:\n"
         f"- **Chosen**: <tool name>\n"
@@ -1584,6 +1628,12 @@ def main() -> None:
               namango init "build a customer support helpdesk for a food delivery app"
               namango init                      # interactive prompt
               namango init "my idea" --output ./my-stack
+
+            Demo examples (try these for a quick showcase):
+              namango init --demo 1   # Customer support helpdesk (food delivery)
+              namango init --demo 2   # Real-time collaborative whiteboard SaaS
+              namango init --demo 3   # AI-powered job board with resume screening
+              namango init --demo 4   # Multi-tenant e-commerce with vendor dashboards
         """),
     )
 
@@ -1603,6 +1653,8 @@ def main() -> None:
     init_p.add_argument("--key",    default=DEFAULT_KEY,     help="Gateway API key")
     init_p.add_argument("--output", default="namango-output", metavar="DIR",
                         help="Output directory for CLAUDE.md and project files (default: ./namango-output)")
+    init_p.add_argument("--demo", type=int, choices=[1, 2, 3, 4], metavar="N",
+                        help="Run a demo example (1-4). Try: namango init --demo 1")
 
     args = parser.parse_args()
 
@@ -1613,6 +1665,26 @@ def main() -> None:
         args.url    = DEFAULT_GATEWAY
         args.key    = DEFAULT_KEY
         args.output = "namango-output"
+
+    # Demo examples
+    DEMO_EXAMPLES = {
+        1: "build a customer support helpdesk for a food delivery app",
+        2: "build a real-time collaborative whiteboard SaaS for remote teams",
+        3: "build an AI-powered job board with resume screening for Indian startups",
+        4: "build a multi-tenant e-commerce platform with vendor dashboards and order notifications",
+    }
+
+    demo = getattr(args, "demo", None)
+    if demo:
+        demo_prompt = DEMO_EXAMPLES[demo]
+        print(f"\n  {BYLW}▶  Demo {demo}:{R}  {BOLD}{demo_prompt}{R}\n")
+        run_pipeline(
+            getattr(args, "url", DEFAULT_GATEWAY),
+            getattr(args, "key", DEFAULT_KEY),
+            demo_prompt,
+            getattr(args, "output", f"namango-demo-{demo}"),
+        )
+        return
 
     # Interactive prompt if not provided
     prompt = getattr(args, "prompt", None)
