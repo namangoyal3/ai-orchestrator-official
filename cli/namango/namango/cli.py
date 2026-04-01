@@ -22,6 +22,7 @@ import sys
 import json
 import time
 import re
+import json
 import argparse
 import textwrap
 import shutil
@@ -238,6 +239,151 @@ def fetch_marketplace_agents_and_tools(url: str, key: str) -> tuple[list[dict], 
     return agents, tools
 
 
+# ── Confirmation Step ─────────────────────────────────────────────────────────
+
+def confirm_understanding(
+    url: str,
+    key: str,
+    user_prompt: str,
+    context: dict,
+    selected_tools: list[dict],
+) -> bool:
+    """
+    Relay-style confirmation: show what we understood and ask the user
+    to confirm before generating the full blueprint. Returns True to proceed.
+    """
+    W = _term_width()
+
+    # Build a short confirmation message from context + selected tools
+    tool_names = ", ".join(t["name"] for t in selected_tools[:5])
+    seo_note = "with SSR for SEO" if "Yes" in context.get("seo", "") else "no SSR needed"
+    deploy_short = context.get("deployment", "").split("(")[0].strip()
+
+    # Ask the LLM to summarise understanding in 2-3 sentences, Relay-style
+    summary_prompt = (
+        f"The developer wants to: {user_prompt}\n\n"
+        f"Product context:\n"
+        f"- Type: {context.get('product_type','')}\n"
+        f"- Scale: {context.get('scale','')}\n"
+        f"- SEO: {context.get('seo','')}\n"
+        f"- Deployment: {context.get('deployment','')}\n"
+        f"- Structure: {context.get('structure','')}\n"
+        f"- Team: {context.get('team_size','')}\n\n"
+        f"Selected stack so far: {tool_names}\n\n"
+        f"Write a 2-sentence confirmation of what the developer is building and why these "
+        f"stack choices make sense for them. Start with 'So you're building'. "
+        f"Be specific — mention the product type, deployment model, and one key constraint. "
+        f"End with '— that right?' on a new line. No markdown, no list, just 2 sentences."
+    )
+
+    print(f"\n  {CYAN}{'─'*(W-2)}{R}")
+    print(f"  {BOLD}Confirming what you're building...{R}\n")
+
+    try:
+        resp = httpx.post(
+            f"{url}/v1/query",
+            json={"prompt": summary_prompt, "preferred_model": DEFAULT_MODEL},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            summary = resp.json().get("response", "").strip()
+        else:
+            summary = None
+    except Exception:
+        summary = None
+
+    # Fallback if LLM unavailable
+    if not summary:
+        summary = (
+            f"So you're building {user_prompt} — a {context.get('product_type','product')} "
+            f"deployed via {deploy_short}, {seo_note}.\n— that right?"
+        )
+
+    # Print the confirmation message like a chat bubble
+    for line in summary.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if "— that right?" in line or "— That right?" in line:
+            print(f"  {CYAN}R{R}  {BOLD}{line}{R}")
+        else:
+            print(f"  {CYAN}R{R}  {line}")
+
+    print()
+    try:
+        ans = input(f"  {DIM}Press Enter to continue, or type a correction:{R}  ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return False
+
+    if ans:
+        # User typed a correction — append it to the prompt for the blueprint step
+        # We mutate the context so the correction flows forward
+        context["_correction"] = ans
+        print(f"\n  {BGRN}✓  Got it — noted for the blueprint.{R}")
+    else:
+        print(f"\n  {BGRN}✓  Great — proceeding.{R}")
+
+    print(f"  {CYAN}{'─'*(W-2)}{R}\n")
+    return True
+
+
+# ── The Catch ─────────────────────────────────────────────────────────────────
+
+def catch_issues(
+    url: str,
+    key: str,
+    user_prompt: str,
+    context: dict,
+    selected_tools: list[dict],
+) -> list[str]:
+    """
+    Relay-style pre-build check: ask the LLM to find real, specific gotchas
+    in the chosen stack given the product context. Returns a list of issue strings.
+    """
+    tool_list = "\n".join(
+        f"- {t['name']} ({t.get('category','?')}, tier={t.get('tier','free')})"
+        for t in selected_tools
+    )
+    catch_prompt = (
+        f"You are a staff engineer doing a pre-build review.\n"
+        f"The developer is building: {user_prompt}\n\n"
+        f"Product context:\n"
+        f"- Type: {context.get('product_type','')}\n"
+        f"- Scale: {context.get('scale','')}\n"
+        f"- SEO required: {context.get('seo','')}\n"
+        f"- Deployment: {context.get('deployment','')}\n"
+        f"- Structure: {context.get('structure','')}\n"
+        f"- Team size: {context.get('team_size','')}\n\n"
+        f"Selected stack:\n{tool_list}\n\n"
+        f"Identify 2-3 REAL, SPECIFIC gotchas or mismatches between this stack and the "
+        f"product context. Not generic advice. Ground each in a specific tool in the stack "
+        f"and a specific constraint from the context (scale, deployment, team size, SEO, etc.).\n"
+        f"If the stack looks solid, say so — don't invent problems.\n\n"
+        f"Reply ONLY as a JSON array of strings, one issue per string, max 20 words each:\n"
+        f'["issue 1", "issue 2"]'
+    )
+
+    try:
+        resp = httpx.post(
+            f"{url}/v1/query",
+            json={"prompt": catch_prompt, "preferred_model": DEFAULT_MODEL},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=45.0,
+        )
+        if resp.status_code == 200:
+            text = resp.json().get("response", "").strip()
+            m = re.search(r'\[[\s\S]*?\]', text)
+            if m:
+                issues = json.loads(m.group(0))
+                if isinstance(issues, list) and all(isinstance(i, str) for i in issues):
+                    return [i.strip() for i in issues if i.strip()]
+    except Exception:
+        pass
+    return []
+
+
 # ── Pipeline Renderer ─────────────────────────────────────────────────────────
 
 def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: str = "") -> str:
@@ -249,6 +395,8 @@ def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: st
         ("questions", "❓  Context Questions"),
         ("catalog",   "📦  Stack Catalog + Marketplace"),
         ("selector",  "🎯  Stack Selector"),
+        ("confirm",   "✅  Confirm Understanding"),
+        ("catch",     "⚠️   Pre-build Check"),
         ("budget",    "💰  Cost Advisor"),
         ("blueprint", "🏗️   Blueprint Builder"),
     ]
@@ -529,6 +677,7 @@ def _build_blueprint_prompt(
     budget: str,
     context: dict | None = None,
     marketplace_agents: list[dict] | None = None,
+    caught_issues: list[str] | None = None,
 ) -> str:
     """Build the LLM prompt that generates a stack blueprint with CLAUDE.md."""
     tool_list = "\n".join(
@@ -580,7 +729,14 @@ def _build_blueprint_prompt(
         f"## Why This Stack\n"
         f"For each selected tool, write exactly 1-2 sentences:\n"
         f"what it does in THIS specific application, not in general.\n\n"
-        f"## Environment Variables\n"
+        + (
+            f"## Pre-build Catches\n"
+            f"Address these specific issues that were flagged before writing code:\n"
+            + "\n".join(f"- {issue}" for issue in caught_issues)
+            + f"\nFor each: confirm it's handled in the chosen approach, or explain the mitigation.\n\n"
+            if caught_issues else ""
+        )
+        + f"## Environment Variables\n"
         f"List every environment variable needed. Format:\n"
         f"- VARIABLE_NAME: what it stores and where to get it\n\n"
         f"## Install\n"
@@ -596,6 +752,11 @@ def _build_blueprint_prompt(
         f"For each tool: what it does in this project specifically.\n\n"
         f"## Architecture\n"
         f"How data flows between the services. Reference the actual domain entities.\n\n"
+        f"## Architecture Decisions\n"
+        f"For each major tool choice, document exactly:\n"
+        f"- **Chosen**: <tool name>\n"
+        f"- **Over**: <what was considered instead>\n"
+        f"- **Because**: <specific reason tied to the product context — scale, team, SEO, deployment>\n\n"
         f"## Key Implementation Notes\n"
         f"3-5 bullets on what to build first, patterns to follow, pitfalls to avoid.\n\n"
         f"## Environment Variables\n"
@@ -817,7 +978,41 @@ def run_pipeline(
         print(f"  {color}  {t['name']:<20}{R}  {DIM}{cat:<14}{R}  [{tier_badge}]  {DIM}{t.get('reason','')}{R}")
     print()
 
-    # ── Step 5: Cost Advisor (interactive) ─────────────────────────────────
+    # ── Step 5: Confirm Understanding ──────────────────────────────────────
+    arch_lines += 3
+    redraw("confirm")
+    print()
+    new_arch = render_pipeline(steps_done, "confirm")
+    sys.stdout.write(new_arch + "\n")
+    sys.stdout.flush()
+    arch_lines = len(new_arch.splitlines()) + 1
+    confirm_understanding(gateway_url, api_key, user_prompt, context, selected)
+    steps_done.append("confirm")
+    print()
+    new_arch = render_pipeline(steps_done, None)
+    sys.stdout.write(new_arch + "\n")
+    sys.stdout.flush()
+    arch_lines = len(new_arch.splitlines()) + 1
+
+    # ── Step 6: Pre-build Check (The Catch) ────────────────────────────────
+    arch_lines += 3
+    redraw("catch")
+    sys.stdout.write(f"  {BYLW}▶{R}  Checking for pre-build issues...\n")
+    sys.stdout.flush()
+    caught = catch_issues(gateway_url, api_key, user_prompt, context, selected)
+    steps_done.append("catch")
+    redraw(None)
+
+    W = _term_width()
+    if caught:
+        print(f"\n  {BYLW}⚠️   Pre-build catches:{R}\n")
+        for issue in caught:
+            print(f"  {BYLW}  •{R}  {issue}")
+        print()
+    else:
+        print(f"\n  {BGRN}⚠️   Pre-build check:{R}  {DIM}Stack looks solid — no issues flagged.{R}\n")
+
+    # ── Step 7: Cost Advisor (interactive) ─────────────────────────────────
     redraw("budget")
     budget = ask_budget(selected)
 
@@ -839,7 +1034,7 @@ def run_pipeline(
     stack_label = "Free / Open Source stack" if budget == "oss" else "Premium stack"
     print(f"\n  {BGRN}💰  Budget:{R}  {BOLD}{stack_label}{R}\n")
 
-    # ── Step 6: Blueprint Builder (SSE streaming) ────────────────────────
+    # ── Step 8: Blueprint Builder (SSE streaming) ────────────────────────
     arch_lines += 3
     redraw("blueprint")
     task = {
@@ -848,6 +1043,7 @@ def run_pipeline(
             user_prompt, final_tools, budget,
             context=context,
             marketplace_agents=marketplace_agents,
+            caught_issues=caught,
         ),
         "model":  DEFAULT_MODEL,
     }
