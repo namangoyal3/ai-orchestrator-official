@@ -14,13 +14,16 @@ from app.api import gateway, agents, tools, keys, analytics, marketplace, archit
 from app.seed import seed_database
 from app.scraper import RepoScraper
 
+logger = logging.getLogger(__name__)
+scheduler = AsyncIOScheduler()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     await seed_database()
-    
+
     # Start background scraper scheduler
     try:
         scraper = RepoScraper()
