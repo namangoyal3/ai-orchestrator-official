@@ -239,6 +239,128 @@ def fetch_marketplace_agents_and_tools(url: str, key: str) -> tuple[list[dict], 
     return agents, tools
 
 
+# ── Marketplace Picker Step ───────────────────────────────────────────────────
+
+def pick_marketplace_items(
+    url: str,
+    key: str,
+    user_prompt: str,
+    selected_stack: list[dict],
+    marketplace_agents: list[dict],
+    marketplace_tools: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """
+    LLM pre-selects relevant marketplace agents/tools for the product, then
+    shows them to the user with toggle controls (enter to confirm, type to edit).
+    Returns (confirmed_agents, confirmed_tools).
+    """
+    if not marketplace_agents and not marketplace_tools:
+        return [], []
+
+    # Ask LLM which marketplace items are relevant
+    stack_names = ", ".join(t["name"] for t in selected_stack)
+    agent_lines = "\n".join(
+        f"  {i+1}. [{a.get('category','agent')}] {a.get('name','?')}: {(a.get('description') or '')[:80]}"
+        for i, a in enumerate(marketplace_agents[:20])
+    )
+    tool_lines = "\n".join(
+        f"  {i+1}. [{t.get('category','tool')}] {t.get('name','?')}: {(t.get('description') or '')[:80]}"
+        for i, t in enumerate(marketplace_tools[:20])
+    )
+
+    selection_prompt = (
+        f"The developer wants to build: {user_prompt}\n"
+        f"Selected stack: {stack_names}\n\n"
+        f"Available marketplace agents:\n{agent_lines}\n\n"
+        f"Available marketplace tools:\n{tool_lines}\n\n"
+        f"Select the 2-4 most relevant agents and 2-4 most relevant tools for this product.\n"
+        f"Reply with ONLY a JSON object, no markdown:\n"
+        f'{{"agents": [<1-based index numbers>], "tools": [<1-based index numbers>]}}'
+    )
+
+    pre_selected_agent_idxs: list[int] = []
+    pre_selected_tool_idxs: list[int] = []
+
+    try:
+        resp = httpx.post(
+            f"{url}/v1/query",
+            json={"prompt": selection_prompt, "preferred_model": DEFAULT_MODEL},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            text = resp.json().get("response", "").strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            m = re.search(r'\{[\s\S]*\}', text)
+            if m:
+                data = json.loads(m.group(0))
+                pre_selected_agent_idxs = [i - 1 for i in data.get("agents", []) if isinstance(i, int) and 1 <= i <= len(marketplace_agents)]
+                pre_selected_tool_idxs  = [i - 1 for i in data.get("tools",  []) if isinstance(i, int) and 1 <= i <= len(marketplace_tools)]
+    except Exception:
+        # Fallback: pre-select first 3 of each
+        pre_selected_agent_idxs = list(range(min(3, len(marketplace_agents))))
+        pre_selected_tool_idxs  = list(range(min(3, len(marketplace_tools))))
+
+    W = _term_width()
+    print(f"\n  {CYAN}{'─' * (W - 4)}{R}")
+    print(f"  {BOLD}🛒  Marketplace Picker{R}  {DIM}— select agents & tools to wire into your architecture{R}")
+    print(f"  {CYAN}{'─' * (W - 4)}{R}\n")
+
+    # Show agents
+    selected_agent_idxs = set(pre_selected_agent_idxs)
+    selected_tool_idxs  = set(pre_selected_tool_idxs)
+
+    def _print_items(items: list[dict], selected_idxs: set, label: str) -> None:
+        print(f"  {BOLD}{label}{R}")
+        for i, item in enumerate(items[:20]):
+            check = f"{BGRN}[✓]{R}" if i in selected_idxs else f"{DIM}[ ]{R}"
+            cat   = item.get("category", "")
+            name  = item.get("name", "?")
+            desc  = (item.get("description") or "")[:60]
+            print(f"  {check} {BOLD}{i+1:>2}.{R} {name:<22} {DIM}{cat:<18}{R} {DIM}{desc}{R}")
+        print()
+
+    _print_items(marketplace_agents[:20], selected_agent_idxs, "Agents")
+    _print_items(marketplace_tools[:20],  selected_tool_idxs,  "Tools")
+
+    print(f"  {DIM}Press {R}{BOLD}Enter{R}{DIM} to confirm, or type agent/tool numbers to toggle "
+          f"(e.g. {R}{BOLD}a1,a3,t2{R}{DIM} to toggle agent 1, agent 3, tool 2):{R} ", end="", flush=True)
+
+    try:
+        raw = input().strip()
+        if raw:
+            for token in re.split(r"[,\s]+", raw.lower()):
+                m = re.match(r'([at])(\d+)', token)
+                if m:
+                    kind, num = m.group(1), int(m.group(2)) - 1
+                    if kind == "a" and 0 <= num < len(marketplace_agents):
+                        if num in selected_agent_idxs:
+                            selected_agent_idxs.discard(num)
+                        else:
+                            selected_agent_idxs.add(num)
+                    elif kind == "t" and 0 <= num < len(marketplace_tools):
+                        if num in selected_tool_idxs:
+                            selected_tool_idxs.discard(num)
+                        else:
+                            selected_tool_idxs.add(num)
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    confirmed_agents = [marketplace_agents[i] for i in sorted(selected_agent_idxs) if i < len(marketplace_agents)]
+    confirmed_tools  = [marketplace_tools[i]  for i in sorted(selected_tool_idxs)  if i < len(marketplace_tools)]
+
+    print(f"\n  {BGRN}✓  Marketplace picks confirmed:{R}")
+    if confirmed_agents:
+        print(f"     {BOLD}Agents:{R}  {', '.join(a.get('name','?') for a in confirmed_agents)}")
+    if confirmed_tools:
+        print(f"     {BOLD}Tools:{R}   {', '.join(t.get('name','?') for t in confirmed_tools)}")
+    if not confirmed_agents and not confirmed_tools:
+        print(f"     {DIM}None selected — skipping marketplace wiring.{R}")
+    print()
+
+    return confirmed_agents, confirmed_tools
+
+
 # ── Confirmation Step ─────────────────────────────────────────────────────────
 
 def confirm_understanding(
@@ -391,14 +513,15 @@ def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: st
     W = _term_width()
 
     NODES = [
-        ("intent",    "🧠  Intent Analyzer"),
-        ("questions", "❓  Context Questions"),
-        ("catalog",   "📦  Stack Catalog + Marketplace"),
-        ("selector",  "🎯  Stack Selector"),
-        ("confirm",   "✅  Confirm Understanding"),
-        ("catch",     "⚠️   Pre-build Check"),
-        ("budget",    "💰  Cost Advisor"),
-        ("blueprint", "🏗️   Blueprint Builder"),
+        ("intent",      "🧠  Intent Analyzer"),
+        ("questions",   "❓  Context Questions"),
+        ("catalog",     "📦  Stack Catalog + Marketplace"),
+        ("selector",    "🎯  Stack Selector"),
+        ("marketplace", "🛒  Marketplace Picker"),
+        ("confirm",     "✅  Confirm Understanding"),
+        ("catch",       "⚠️   Pre-build Check"),
+        ("budget",      "💰  Cost Advisor"),
+        ("blueprint",   "🏗️   Blueprint Builder"),
     ]
 
     lines = []
@@ -678,6 +801,8 @@ def _build_blueprint_prompt(
     context: dict | None = None,
     marketplace_agents: list[dict] | None = None,
     caught_issues: list[str] | None = None,
+    confirmed_agents: list[dict] | None = None,
+    confirmed_tools: list[dict] | None = None,
 ) -> str:
     """Build the LLM prompt that generates a stack blueprint with CLAUDE.md."""
     tool_list = "\n".join(
@@ -700,9 +825,9 @@ def _build_blueprint_prompt(
             f"- Team size: {context.get('team_size', 'N/A')}\n\n"
         )
 
-    # Marketplace agents section
+    # Marketplace agents section (generic hints — lower priority than confirmed picks)
     agents_section = ""
-    if marketplace_agents:
+    if marketplace_agents and not confirmed_agents:
         relevant = [
             f"  - {a.get('name','?')}: {(a.get('description') or '')[:80]}"
             for a in marketplace_agents[:10]
@@ -713,6 +838,25 @@ def _build_blueprint_prompt(
             + "\n".join(relevant) + "\n\n"
         )
 
+    # User-confirmed marketplace picks — these MUST appear in the blueprint
+    confirmed_section = ""
+    if confirmed_agents or confirmed_tools:
+        lines = []
+        if confirmed_agents:
+            lines.append("Agents the developer selected from the Namango marketplace:")
+            for a in confirmed_agents:
+                lines.append(f"  - {a.get('name','?')} [{a.get('category','')}]: {(a.get('description') or '')[:80]}")
+        if confirmed_tools:
+            lines.append("Tools the developer selected from the Namango marketplace:")
+            for t in confirmed_tools:
+                lines.append(f"  - {t.get('name','?')} [{t.get('category','')}]: {(t.get('description') or '')[:80]}")
+        confirmed_section = (
+            "CONFIRMED MARKETPLACE PICKS (developer explicitly selected these — "
+            "you MUST include them in the architecture and add a '## Marketplace Integrations' "
+            "section explaining how each one wires into the stack):\n"
+            + "\n".join(lines) + "\n\n"
+        )
+
     return (
         f"You are a senior software architect at a top YC startup.\n"
         f"Generate a detailed stack blueprint for building:\n\n"
@@ -720,6 +864,7 @@ def _build_blueprint_prompt(
         f"{ctx_section}"
         f"SELECTED STACK ({tier_label}):\n{tool_list}\n\n"
         f"{agents_section}"
+        f"{confirmed_section}"
         f"Produce output with EXACTLY these sections in order:\n\n"
         f"## Architecture Diagram\n"
         f"Draw an ASCII box diagram showing how {tool_names} connect.\n"
@@ -729,6 +874,12 @@ def _build_blueprint_prompt(
         f"## Why This Stack\n"
         f"For each selected tool, write exactly 1-2 sentences:\n"
         f"what it does in THIS specific application, not in general.\n\n"
+        + (
+            f"## Marketplace Integrations\n"
+            f"For each confirmed marketplace pick, explain exactly how it wires into the stack:\n"
+            f"what it replaces or extends, how to install/configure it, and one implementation note.\n\n"
+            if (confirmed_agents or confirmed_tools) else ""
+        )
         + (
             f"## Pre-build Catches\n"
             f"Address these specific issues that were flagged before writing code:\n"
@@ -978,6 +1129,15 @@ def run_pipeline(
         print(f"  {color}  {t['name']:<20}{R}  {DIM}{cat:<14}{R}  [{tier_badge}]  {DIM}{t.get('reason','')}{R}")
     print()
 
+    # ── Step 4b: Marketplace Picker ─────────────────────────────────────────
+    redraw("marketplace")
+    confirmed_agents, confirmed_tools = pick_marketplace_items(
+        gateway_url, api_key, user_prompt, selected,
+        marketplace_agents, marketplace_tools,
+    )
+    steps_done.append("marketplace")
+    redraw(None)
+
     # ── Step 5: Confirm Understanding ──────────────────────────────────────
     arch_lines += 3
     redraw("confirm")
@@ -1044,6 +1204,8 @@ def run_pipeline(
             context=context,
             marketplace_agents=marketplace_agents,
             caught_issues=caught,
+            confirmed_agents=confirmed_agents,
+            confirmed_tools=confirmed_tools,
         ),
         "model":  DEFAULT_MODEL,
     }
