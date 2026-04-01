@@ -144,6 +144,100 @@ def _term_width() -> int:
     return max(60, min(72, shutil.get_terminal_size(fallback=(80, 24)).columns - 4))
 
 
+# ── Context Questions ─────────────────────────────────────────────────────────
+
+def gather_context() -> dict:
+    """
+    Ask 6 targeted product questions before stack selection.
+    Returns a dict with keys: product_type, scale, seo, deployment, structure, team_size.
+    Pressing Enter uses the default (option 1).
+    """
+    W = _term_width()
+    print(f"\n  {CYAN}{'─'*(W-2)}{R}")
+    print(f"  {BOLD}A few quick questions to tailor your stack:{R}")
+    print(f"  {DIM}Press Enter to accept the default for each.{R}\n")
+
+    menus = [
+        ("product_type", "What type of product is this?", [
+            "B2B SaaS",
+            "B2C consumer app",
+            "Internal / team tool",
+            "API / service / SDK",
+        ]),
+        ("scale", "Expected scale at launch?", [
+            "MVP / prototype  (< 100 users)",
+            "Early-stage      (< 10k users)",
+            "Scale-up         (10k–100k users)",
+            "Enterprise       (100k+ users)",
+        ]),
+        ("seo", "Does this need SEO / server-side rendering?", [
+            "No  — dashboard, SPA, or internal tool",
+            "Yes — public-facing marketing or content site",
+        ]),
+        ("deployment", "Deployment model?", [
+            "Fully managed cloud  (Railway, Vercel, Render)",
+            "Container / self-hosted  (Docker, Kubernetes)",
+            "Serverless  (Lambda, Edge functions)",
+        ]),
+        ("structure", "App structure?", [
+            "Single monolith / monorepo",
+            "Microservices / multiple separate apps",
+        ]),
+        ("team_size", "Team size?", [
+            "Solo founder",
+            "Small  (2–5 people)",
+            "Medium (5–20 people)",
+            "Large  (20+ people)",
+        ]),
+    ]
+
+    ctx: dict = {}
+    for key, question, options in menus:
+        print(f"  {BOLD}{question}{R}")
+        for i, opt in enumerate(options, 1):
+            print(f"    {CYAN}[{i}]{R} {opt}")
+        try:
+            raw = input(f"\n  {DIM}Enter number (default 1):{R}  ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            ctx[key] = options[0]
+            continue
+        try:
+            idx = int(raw) - 1
+            ctx[key] = options[idx] if 0 <= idx < len(options) else options[0]
+        except ValueError:
+            ctx[key] = options[0]
+        print()
+
+    print(f"  {CYAN}{'─'*(W-2)}{R}\n")
+    return ctx
+
+
+# ── Marketplace Fetch ─────────────────────────────────────────────────────────
+
+def fetch_marketplace_agents_and_tools(url: str, key: str) -> tuple[list[dict], list[dict]]:
+    """
+    Fetch the built-in agents and tools from the gateway marketplace.
+    Used to include OSS agent/tool options in stack recommendations.
+    Returns (agents, tools) — both lists of dicts with slug/name/description.
+    """
+    agents: list[dict] = []
+    tools:  list[dict] = []
+    try:
+        r = httpx.get(f"{url}/v1/agents", headers={"X-API-Key": key}, timeout=5.0)
+        if r.status_code == 200:
+            agents = r.json().get("agents", [])
+    except Exception:
+        pass
+    try:
+        r = httpx.get(f"{url}/v1/tools", headers={"X-API-Key": key}, timeout=5.0)
+        if r.status_code == 200:
+            tools = r.json().get("tools", [])
+    except Exception:
+        pass
+    return agents, tools
+
+
 # ── Pipeline Renderer ─────────────────────────────────────────────────────────
 
 def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: str = "") -> str:
@@ -152,7 +246,8 @@ def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: st
 
     NODES = [
         ("intent",    "🧠  Intent Analyzer"),
-        ("catalog",   "📦  Stack Catalog"),
+        ("questions", "❓  Context Questions"),
+        ("catalog",   "📦  Stack Catalog + Marketplace"),
         ("selector",  "🎯  Stack Selector"),
         ("budget",    "💰  Cost Advisor"),
         ("blueprint", "🏗️   Blueprint Builder"),
@@ -227,10 +322,19 @@ def _flatten_catalog(catalog: dict[str, list[dict]]) -> list[dict]:
     return all_tools
 
 
-def select_tools(url: str, key: str, user_prompt: str, catalog: dict) -> list[dict]:
+def select_tools(
+    url: str,
+    key: str,
+    user_prompt: str,
+    catalog: dict,
+    context: dict | None = None,
+    marketplace_agents: list[dict] | None = None,
+    marketplace_tools: list[dict] | None = None,
+) -> list[dict]:
     """
     Ask the gateway LLM to select the best 5-8 tools from the stack catalog
     for the user's product idea. Falls back to keyword scoring on failure.
+    Enriches the prompt with product context and marketplace agents/tools.
     """
     all_tools = _flatten_catalog(catalog)
 
@@ -243,14 +347,48 @@ def select_tools(url: str, key: str, user_prompt: str, catalog: dict) -> list[di
         tier  = t.get("tier", "free")
         prompt_lines.append(f"[{cat}] {name}: {desc} (tier={tier})")
 
+    # Build product context block
+    ctx_block = ""
+    if context:
+        ctx_lines = [
+            f"- Product type: {context.get('product_type', '')}",
+            f"- Scale: {context.get('scale', '')}",
+            f"- SEO / SSR needed: {context.get('seo', '')}",
+            f"- Deployment model: {context.get('deployment', '')}",
+            f"- App structure: {context.get('structure', '')}",
+            f"- Team size: {context.get('team_size', '')}",
+        ]
+        ctx_block = "Product context (use this to guide tool selection):\n" + "\n".join(ctx_lines) + "\n\n"
+
+    # Append marketplace agents/tools as additional OSS options
+    mp_block = ""
+    if marketplace_agents:
+        agent_lines = [
+            f"  [agent] {a.get('name','?')}: {(a.get('description') or '')[:70]}"
+            for a in marketplace_agents[:12]
+        ]
+        mp_block += "Available AI agents from the Namango marketplace (consider recommending relevant ones):\n"
+        mp_block += "\n".join(agent_lines) + "\n\n"
+    if marketplace_tools:
+        tool_lines = [
+            f"  [tool] {t.get('name','?')}: {(t.get('description') or '')[:70]}"
+            for t in marketplace_tools[:12]
+        ]
+        mp_block += "Available AI tools from the Namango marketplace:\n"
+        mp_block += "\n".join(tool_lines) + "\n\n"
+
     selection_prompt = (
         f"You are a senior software architect helping a developer pick their tech stack.\n"
+        f"{ctx_block}"
         f"The developer wants to: {user_prompt}\n\n"
         f"Available tools from the Namango catalog:\n"
         + "\n".join(prompt_lines)
+        + (f"\n\n{mp_block}" if mp_block else "")
         + "\n\nSelect 5-8 tools that form a complete, coherent stack for this product.\n"
-        f"Prefer tools that work well together. Include at minimum: one web framework, "
-        f"one database, and one deploy option.\n"
+        f"Prefer OSS and free-tier tools unless the product context requires otherwise.\n"
+        f"Include at minimum: one web framework, one database, and one deploy option.\n"
+        f"If the product context calls for SEO, prefer Next.js (SSR). "
+        f"If container-based, include Docker.\n"
         f"Reply with ONLY a JSON array, no markdown:\n"
         f'[{{"name":"<exact name from catalog>", "category":"<category>", '
         f'"tier":"free|freemium|paid", "reason":"one sentence why this tool fits"}}]'
@@ -385,7 +523,13 @@ def ask_budget(selected_tools: list[dict]) -> str:
 
 # ── Blueprint Generation ──────────────────────────────────────────────────────
 
-def _build_blueprint_prompt(user_prompt: str, tools: list[dict], budget: str) -> str:
+def _build_blueprint_prompt(
+    user_prompt: str,
+    tools: list[dict],
+    budget: str,
+    context: dict | None = None,
+    marketplace_agents: list[dict] | None = None,
+) -> str:
     """Build the LLM prompt that generates a stack blueprint with CLAUDE.md."""
     tool_list = "\n".join(
         f"- {t['name']} ({t.get('category','?')}): {t.get('reason', 'core component')}"
@@ -394,11 +538,39 @@ def _build_blueprint_prompt(user_prompt: str, tools: list[dict], budget: str) ->
     tool_names = ", ".join(t["name"] for t in tools)
     tier_label = "Free/Open Source" if budget == "oss" else "Premium/Production"
 
+    # Product context section
+    ctx_section = ""
+    if context:
+        ctx_section = (
+            f"PRODUCT CONTEXT:\n"
+            f"- Type: {context.get('product_type', 'N/A')}\n"
+            f"- Scale: {context.get('scale', 'N/A')}\n"
+            f"- SEO/SSR required: {context.get('seo', 'N/A')}\n"
+            f"- Deployment: {context.get('deployment', 'N/A')}\n"
+            f"- Structure: {context.get('structure', 'N/A')}\n"
+            f"- Team size: {context.get('team_size', 'N/A')}\n\n"
+        )
+
+    # Marketplace agents section
+    agents_section = ""
+    if marketplace_agents:
+        relevant = [
+            f"  - {a.get('name','?')}: {(a.get('description') or '')[:80]}"
+            for a in marketplace_agents[:10]
+        ]
+        agents_section = (
+            f"AVAILABLE NAMANGO AI AGENTS (OSS — mention the relevant ones in the blueprint "
+            f"under a 'AI Agents' section so the developer knows which to wire in):\n"
+            + "\n".join(relevant) + "\n\n"
+        )
+
     return (
         f"You are a senior software architect at a top YC startup.\n"
         f"Generate a detailed stack blueprint for building:\n\n"
         f"  {user_prompt}\n\n"
+        f"{ctx_section}"
         f"SELECTED STACK ({tier_label}):\n{tool_list}\n\n"
+        f"{agents_section}"
         f"Produce output with EXACTLY these sections in order:\n\n"
         f"## Architecture Diagram\n"
         f"Draw an ASCII box diagram showing how {tool_names} connect.\n"
@@ -577,26 +749,62 @@ def run_pipeline(
     time.sleep(0.4)
     steps_done.append("intent")
     redraw(None)
-    print(f"\n  {BGRN}🧠  Intent:{R}  {DIM}domain understood · fetching curated stack catalog{R}\n")
+    print(f"\n  {BGRN}🧠  Intent:{R}  {DIM}domain understood · gathering product context{R}\n")
 
-    # ── Step 2: Stack Catalog Fetch ─────────────────────────────────────────
+    # ── Step 2: Context Questions (interactive) ─────────────────────────────
+    redraw("questions")
+    # Print a fresh pipeline box before interactive input so cursor-up works cleanly after
+    print()
+    new_arch = render_pipeline(steps_done, "questions")
+    sys.stdout.write(new_arch + "\n")
+    sys.stdout.flush()
+    arch_lines = len(new_arch.splitlines()) + 1
+    context = gather_context()
+    steps_done.append("questions")
+    print()
+    new_arch = render_pipeline(steps_done, None)
+    sys.stdout.write(new_arch + "\n")
+    sys.stdout.flush()
+    arch_lines = len(new_arch.splitlines()) + 1
+
+    ctx_summary = (
+        f"{context.get('product_type','?')} · "
+        f"{context.get('scale','?').split('(')[0].strip()} · "
+        f"{'SSR' if 'Yes' in context.get('seo','') else 'SPA'} · "
+        f"{context.get('deployment','?').split('(')[0].strip()}"
+    )
+    print(f"\n  {BGRN}❓  Context:{R}  {DIM}{ctx_summary}{R}\n")
+
+    # ── Step 3: Stack Catalog + Marketplace Fetch ───────────────────────────
+    arch_lines += 3
     redraw("catalog")
-    sys.stdout.write(f"  {BYLW}▶{R}  Fetching Namango stack catalog...\n")
+    sys.stdout.write(f"  {BYLW}▶{R}  Fetching stack catalog and marketplace agents/tools...\n")
     sys.stdout.flush()
     catalog = fetch_stack_catalog(gateway_url, api_key)
+    marketplace_agents, marketplace_tools = fetch_marketplace_agents_and_tools(gateway_url, api_key)
     all_tools_flat = _flatten_catalog(catalog)
-    total     = len(all_tools_flat)
-    n_cats    = len(catalog)
+    total  = len(all_tools_flat)
+    n_cats = len(catalog)
+    n_agents = len(marketplace_agents)
+    n_tools  = len(marketplace_tools)
     steps_done.append("catalog")
     redraw(None)
-    print(f"\n  {BGRN}📦  Catalog:{R}  {BOLD}{total} tools{R}  "
-          f"{DIM}across {n_cats} categories (web · db · auth · payments · deploy · ai...){R}\n")
+    print(f"\n  {BGRN}📦  Catalog:{R}  {BOLD}{total} stack tools{R}  "
+          f"{DIM}across {n_cats} categories{R}  +  "
+          f"{BOLD}{n_agents} agents{R} / {BOLD}{n_tools} tools{R} "
+          f"{DIM}from marketplace{R}\n")
 
-    # ── Step 3: Stack Selector ──────────────────────────────────────────────
+    # ── Step 4: Stack Selector ──────────────────────────────────────────────
+    arch_lines += 3
     redraw("selector")
     sys.stdout.write(f"  {BYLW}▶{R}  Selecting optimal stack for your product...\n")
     sys.stdout.flush()
-    selected = select_tools(gateway_url, api_key, user_prompt, catalog)
+    selected = select_tools(
+        gateway_url, api_key, user_prompt, catalog,
+        context=context,
+        marketplace_agents=marketplace_agents,
+        marketplace_tools=marketplace_tools,
+    )
     steps_done.append("selector")
     redraw(None)
 
@@ -609,7 +817,7 @@ def run_pipeline(
         print(f"  {color}  {t['name']:<20}{R}  {DIM}{cat:<14}{R}  [{tier_badge}]  {DIM}{t.get('reason','')}{R}")
     print()
 
-    # ── Step 4: Cost Advisor (interactive) ─────────────────────────────────
+    # ── Step 5: Cost Advisor (interactive) ─────────────────────────────────
     redraw("budget")
     budget = ask_budget(selected)
 
@@ -631,12 +839,16 @@ def run_pipeline(
     stack_label = "Free / Open Source stack" if budget == "oss" else "Premium stack"
     print(f"\n  {BGRN}💰  Budget:{R}  {BOLD}{stack_label}{R}\n")
 
-    # ── Step 5: Blueprint Builder (SSE streaming) ────────────────────────
+    # ── Step 6: Blueprint Builder (SSE streaming) ────────────────────────
     arch_lines += 3
     redraw("blueprint")
     task = {
         "title":  title,
-        "prompt": _build_blueprint_prompt(user_prompt, final_tools, budget),
+        "prompt": _build_blueprint_prompt(
+            user_prompt, final_tools, budget,
+            context=context,
+            marketplace_agents=marketplace_agents,
+        ),
         "model":  DEFAULT_MODEL,
     }
     _stream_blueprint(gateway_url, api_key, task, final_tools, output_dir, steps_done, redraw)
