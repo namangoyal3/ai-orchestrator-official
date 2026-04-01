@@ -1,10 +1,12 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ai-gateway-backend-production.up.railway.app";
 
+const DEMO_KEY = "gw-demo-key-change-in-production-12345678";
+
 export function getApiKey(): string {
   if (typeof window !== "undefined") {
-    return localStorage.getItem("gw_api_key") || "";
+    return localStorage.getItem("gw_api_key") || DEMO_KEY;
   }
-  return "";
+  return DEMO_KEY;
 }
 
 export function hasApiKey(): boolean {

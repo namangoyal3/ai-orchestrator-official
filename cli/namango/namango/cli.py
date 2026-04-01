@@ -31,7 +31,7 @@ import httpx
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DEFAULT_GATEWAY = os.getenv("GATEWAY_URL", "https://ai-gateway-backend-production.up.railway.app")
-DEFAULT_KEY     = os.getenv("API_KEY", "gw-bn1RrcLqzARb5mPpBMiCzB0ZbxhpCVasQ_5hz9aWIrE")
+DEFAULT_KEY     = os.getenv("API_KEY", "gw-demo-key-change-in-production-12345678")
 DEFAULT_MODEL   = "meta-llama/llama-3.1-70b-instruct"
 
 # ── ANSI ─────────────────────────────────────────────────────────────────────
