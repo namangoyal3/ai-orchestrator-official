@@ -303,13 +303,15 @@ async def recommend_flow(body: RecommendRequest, api_key=Depends(validate_api_ke
         for choice in MODELS.values()
     )
 
-    prompt = f"""You are an AI orchestration architect. A user has described their product and wants to know the optimal combination of AI agents, tools, and LLMs to power it.
+    prompt = f"""You are the Namango AI Orchestration Architect — a principal engineer specializing in designing production AI pipelines. Your job is to analyze a product description and design the optimal combination of AI agents, tools, and LLMs to power it end-to-end.
+
+You think like a CTO: every recommendation must be justified by the product's specific use cases. No filler agents. No redundant tools. Every component earns its place.
 
 PRODUCT DESCRIPTION:
 {body.product_description}
 
 USE CASES:
-{chr(10).join(f"- {uc}" for uc in body.use_cases) if body.use_cases else "Not specified"}
+{chr(10).join(f"- {uc}" for uc in body.use_cases) if body.use_cases else "Not specified — infer from the product description"}
 
 AVAILABLE AGENTS:
 {agents_list}
@@ -320,18 +322,26 @@ AVAILABLE TOOLS:
 AVAILABLE LLMs:
 {llms_list}
 
-Respond ONLY with valid JSON in this exact schema (no markdown, no explanation):
+SELECTION CRITERIA:
+- Agents: Choose 2-4 agents whose capabilities directly match the product's core workflows. For each, explain the exact role it plays — not just "it helps with X" but "it does Y when the user does Z".
+- Tools: Choose 3-6 tools that the selected agents genuinely need. Map each tool to the agent that uses it and the specific task it enables.
+- LLM: Choose the single best LLM for this product's PRIMARY AI workload. Consider: reasoning depth required, context length needed, cost sensitivity, latency requirements. Justify your choice.
+- Flow: Design a realistic data pipeline — show how user input travels through agents and tools to produce the final output. Be specific to this product's domain.
+- Action Plan: Break implementation into 3-5 concrete phases. Each phase should be independently shippable. Order by business value (most impactful first).
+
+CRITICAL: Respond ONLY with valid JSON. No markdown fences. No explanation outside the JSON. Every string value must be specific to this product — no generic placeholders.
+
 {{
-  "product_summary": "one sentence summary of what the product does",
-  "recommended_llm": "model_id from the available LLMs list",
-  "llm_reason": "why this LLM is best for this product",
+  "product_summary": "One precise sentence: what this product does and who it's for",
+  "recommended_llm": "exact model_id from the available LLMs list",
+  "llm_reason": "2 sentences: why this LLM specifically — mention context length, reasoning capability, cost, or latency trade-off relevant to this product",
   "recommended_agents": [
     {{
       "slug": "agent_slug",
       "name": "Agent Name",
       "icon": "emoji",
-      "reason": "why this agent is needed",
-      "role_in_flow": "what this agent does specifically for this product"
+      "reason": "why this agent is essential — tied to a specific use case",
+      "role_in_flow": "exactly what this agent does at runtime for this product (not generic)"
     }}
   ],
   "recommended_tools": [
@@ -339,8 +349,8 @@ Respond ONLY with valid JSON in this exact schema (no markdown, no explanation):
       "slug": "tool_slug",
       "name": "Tool Name",
       "icon": "emoji",
-      "reason": "why this tool is needed",
-      "used_by_agent": "which agent primarily uses this tool"
+      "reason": "why this tool is needed — the specific capability it provides",
+      "used_by_agent": "which agent slug primarily uses this tool"
     }}
   ],
   "flow_steps": [
@@ -348,27 +358,25 @@ Respond ONLY with valid JSON in this exact schema (no markdown, no explanation):
       "id": "step_id",
       "label": "Step Label",
       "type": "input|llm|agent|tool|output",
-      "component": "slug or label",
+      "component": "slug or descriptive label",
       "icon": "emoji",
-      "description": "what happens at this step",
+      "description": "exactly what happens at this step — domain-specific, not generic",
       "connects_to": ["next_step_id"]
     }}
   ],
   "action_plan": [
     {{
       "step": 1,
-      "title": "Phase title",
-      "description": "what to implement in this phase",
+      "title": "Phase title — outcome-oriented",
+      "description": "What to build in this phase and why it's the right first step",
       "agents": ["agent_slugs"],
       "tools": ["tool_slugs"],
       "llm": "model_id",
-      "expected_output": "what this phase produces"
+      "expected_output": "The concrete, testable deliverable from this phase"
     }}
   ],
-  "api_snippet": "curl -X POST https://your-gateway.com/v1/query -H 'X-API-Key: YOUR_KEY' -d '{{...}}'"
-}}
-
-Select 2-4 agents and 3-6 tools that are most relevant. Create 4-7 flow steps showing the data pipeline. Create 3-5 action plan phases. Make the api_snippet a realistic example for this specific product."""
+  "api_snippet": "A realistic curl example hitting /v1/query with a prompt specific to this product's primary use case"
+}}"""
 
     try:
         # Route to optimal LLM (fallback to Bedrock Haiku if direct Anthropic key missing)
@@ -383,7 +391,7 @@ Select 2-4 agents and 3-6 tools that are most relevant. Create 4-7 flow steps sh
         raw, _, _ = await execute_llm(
             llm_choice,
             messages=[{"role": "user", "content": prompt}],
-            system="You are an AI orchestration architect. Output only valid JSON.",
+            system="You are the Namango AI Orchestration Architect. You design precise, production-grade AI pipelines. Output only valid JSON — no markdown, no commentary.",
             max_tokens=4096,
         )
         # Strip any accidental markdown fences

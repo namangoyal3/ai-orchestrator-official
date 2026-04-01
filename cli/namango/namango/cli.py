@@ -175,15 +175,6 @@ def gather_context() -> dict:
             "No  — dashboard, SPA, or internal tool",
             "Yes — public-facing marketing or content site",
         ]),
-        ("deployment", "Deployment model?", [
-            "Fully managed cloud  (Railway, Vercel, Render)",
-            "Container / self-hosted  (Docker, Kubernetes)",
-            "Serverless  (Lambda, Edge functions)",
-        ]),
-        ("structure", "App structure?", [
-            "Single monolith / monorepo",
-            "Microservices / multiple separate apps",
-        ]),
         ("team_size", "Team size?", [
             "Solo founder",
             "Small  (2–5 people)",
@@ -257,47 +248,39 @@ def pick_marketplace_items(
     if not marketplace_agents and not marketplace_tools:
         return [], []
 
-    # Ask LLM which marketplace items are relevant
-    stack_names = ", ".join(t["name"] for t in selected_stack)
-    agent_lines = "\n".join(
-        f"  {i+1}. [{a.get('category','agent')}] {a.get('name','?')}: {(a.get('description') or '')[:80]}"
-        for i, a in enumerate(marketplace_agents[:20])
-    )
-    tool_lines = "\n".join(
-        f"  {i+1}. [{t.get('category','tool')}] {t.get('name','?')}: {(t.get('description') or '')[:80]}"
-        for i, t in enumerate(marketplace_tools[:20])
-    )
-
-    selection_prompt = (
-        f"The developer wants to build: {user_prompt}\n"
-        f"Selected stack: {stack_names}\n\n"
-        f"Available marketplace agents:\n{agent_lines}\n\n"
-        f"Available marketplace tools:\n{tool_lines}\n\n"
-        f"Select the 2-4 most relevant agents and 2-4 most relevant tools for this product.\n"
-        f"Reply with ONLY a JSON object, no markdown:\n"
-        f'{{"agents": [<1-based index numbers>], "tools": [<1-based index numbers>]}}'
-    )
-
-    pre_selected_agent_idxs: list[int] = []
-    pre_selected_tool_idxs: list[int] = []
+    # Call /v1/architect/design to get marketplace + catalog suggestions from the backend
+    pre_selected_agent_slugs: set[str] = set()
+    pre_selected_tool_slugs:  set[str] = set()
 
     try:
+        architect_payload = {
+            "prompt": user_prompt,
+            "optimization": "cost",
+        }
         resp = httpx.post(
-            f"{url}/v1/query",
-            json={"prompt": selection_prompt, "preferred_model": DEFAULT_MODEL},
+            f"{url}/v1/architect/design",
+            json=architect_payload,
             headers={"X-API-Key": key, "Content-Type": "application/json"},
             timeout=30.0,
         )
         if resp.status_code == 200:
-            text = resp.json().get("response", "").strip()
-            text = text.replace("```json", "").replace("```", "").strip()
-            m = re.search(r'\{[\s\S]*\}', text)
-            if m:
-                data = json.loads(m.group(0))
-                pre_selected_agent_idxs = [i - 1 for i in data.get("agents", []) if isinstance(i, int) and 1 <= i <= len(marketplace_agents)]
-                pre_selected_tool_idxs  = [i - 1 for i in data.get("tools",  []) if isinstance(i, int) and 1 <= i <= len(marketplace_tools)]
+            data = resp.json()
+            pre_selected_agent_slugs = set(data.get("recommended_agents", []))
+            pre_selected_tool_slugs  = set(data.get("recommended_mcps", []))
     except Exception:
-        # Fallback: pre-select first 3 of each
+        pass
+
+    # Map slug matches → index positions in the displayed lists
+    def _slug_match(item: dict, slugs: set[str]) -> bool:
+        slug = (item.get("slug") or item.get("name") or "").lower().replace(" ", "-")
+        name = (item.get("name") or "").lower()
+        return any(s.lower() in slug or s.lower() in name or slug in s.lower() for s in slugs)
+
+    pre_selected_agent_idxs = [i for i, a in enumerate(marketplace_agents[:20]) if _slug_match(a, pre_selected_agent_slugs)]
+    pre_selected_tool_idxs  = [i for i, t in enumerate(marketplace_tools[:20])  if _slug_match(t, pre_selected_tool_slugs)]
+
+    # Fallback: pre-select first 3 if architect returned nothing
+    if not pre_selected_agent_idxs and not pre_selected_tool_idxs:
         pre_selected_agent_idxs = list(range(min(3, len(marketplace_agents))))
         pre_selected_tool_idxs  = list(range(min(3, len(marketplace_tools))))
 
@@ -649,20 +632,31 @@ def select_tools(
         mp_block += "\n".join(tool_lines) + "\n\n"
 
     selection_prompt = (
-        f"You are a senior software architect helping a developer pick their tech stack.\n"
+        f"You are the Namango Stack Selector — a principal engineer and CTO advisor who has designed production stacks for 100+ products across fintech, SaaS, consumer apps, and developer tools. You pick the minimal, coherent stack that best fits this specific product — not a generic boilerplate.\n\n"
+        f"SELECTION PRINCIPLES:\n"
+        f"1. Minimal viable stack — every tool must earn its place. No tool just because it's popular.\n"
+        f"2. Coherence — tools must compose well together (no ORM that fights your database, no queue that conflicts with your framework)\n"
+        f"3. Context-driven — the product type, scale, team size, and deployment model must drive every choice\n"
+        f"4. OSS-first — prefer free/open-source unless the product context demands otherwise\n"
+        f"5. Must-haves: at minimum one web framework, one database, and one deployment tool\n\n"
+        f"CONTEXT-SPECIFIC RULES:\n"
+        f"- SEO required → prefer Next.js (SSR) over React SPA\n"
+        f"- Container/self-hosted deployment → include Docker\n"
+        f"- Solo founder or small team → pick tools with excellent DX and minimal ops overhead\n"
+        f"- MVP/prototype scale → SQLite or Supabase over a self-hosted PostgreSQL cluster\n"
+        f"- High scale → PostgreSQL + Redis + a message queue\n"
+        f"- B2B SaaS → include an auth solution with RBAC\n"
+        f"- Payment required → Stripe (global) or Razorpay (India)\n\n"
         f"{ctx_block}"
-        f"The developer wants to: {user_prompt}\n\n"
-        f"Available tools from the Namango catalog:\n"
+        f"PRODUCT TO BUILD: {user_prompt}\n\n"
+        f"AVAILABLE STACK CATALOG:\n"
         + "\n".join(prompt_lines)
         + (f"\n\n{mp_block}" if mp_block else "")
-        + "\n\nSelect 5-8 tools that form a complete, coherent stack for this product.\n"
-        f"Prefer OSS and free-tier tools unless the product context requires otherwise.\n"
-        f"Include at minimum: one web framework, one database, and one deploy option.\n"
-        f"If the product context calls for SEO, prefer Next.js (SSR). "
-        f"If container-based, include Docker.\n"
-        f"Reply with ONLY a JSON array, no markdown:\n"
+        + f"\n\nSelect 5-8 tools that form a complete, production-ready stack for this specific product.\n"
+        f"For each tool, write a reason that is specific to THIS product — not a generic description.\n"
+        f"Reply with ONLY a JSON array, no markdown, no explanation:\n"
         f'[{{"name":"<exact name from catalog>", "category":"<category>", '
-        f'"tier":"free|freemium|paid", "reason":"one sentence why this tool fits"}}]'
+        f'"tier":"free|freemium|paid", "reason":"one sentence — why this tool specifically for this product and context"}}]'
     )
 
     # Build name → item lookup for enrichment
@@ -1065,12 +1059,7 @@ def run_pipeline(
 
     # ── Step 2: Context Questions (interactive) ─────────────────────────────
     redraw("questions")
-    # Print a fresh pipeline box before interactive input so cursor-up works cleanly after
-    print()
-    new_arch = render_pipeline(steps_done, "questions")
-    sys.stdout.write(new_arch + "\n")
-    sys.stdout.flush()
-    arch_lines = len(new_arch.splitlines()) + 1
+    arch_lines = len(render_pipeline(steps_done, "questions").splitlines()) + 1
     context = gather_context()
     steps_done.append("questions")
     print()
@@ -1106,7 +1095,7 @@ def run_pipeline(
           f"{BOLD}{n_agents} agents{R} / {BOLD}{n_tools} tools{R} "
           f"{DIM}from marketplace{R}\n")
 
-    # ── Step 4: Stack Selector ──────────────────────────────────────────────
+    # ── Step 4: Stack Selector (CLI LLM) ───────────────────────────────────
     arch_lines += 3
     redraw("selector")
     sys.stdout.write(f"  {BYLW}▶{R}  Selecting optimal stack for your product...\n")
