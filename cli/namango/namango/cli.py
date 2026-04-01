@@ -496,15 +496,13 @@ def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: st
     W = _term_width()
 
     NODES = [
-        ("intent",      "🧠  Intent Analyzer"),
-        ("questions",   "❓  Context Questions"),
-        ("catalog",     "📦  Stack Catalog + Marketplace"),
-        ("selector",    "🎯  Stack Selector"),
-        ("marketplace", "🛒  Marketplace Picker"),
-        ("confirm",     "✅  Confirm Understanding"),
-        ("catch",       "⚠️   Pre-build Check"),
-        ("budget",      "💰  Cost Advisor"),
-        ("blueprint",   "🏗️   Blueprint Builder"),
+        ("intent",    "🧠  Intent Analyzer"),
+        ("questions", "❓  Context Questions"),
+        ("selector",  "🎯  Stack + Marketplace Selector"),
+        ("confirm",   "✅  Confirm Understanding"),
+        ("catch",     "⚠️   Pre-build Check"),
+        ("budget",    "💰  Cost Advisor"),
+        ("blueprint", "🏗️   Blueprint Builder"),
     ]
 
     lines = []
@@ -574,6 +572,115 @@ def _flatten_catalog(catalog: dict[str, list[dict]]) -> list[dict]:
         for t in tools:
             all_tools.append({**t, "category": t.get("category") or category})
     return all_tools
+
+
+def _find_template_match(
+    url: str,
+    key: str,
+    user_prompt: str,
+    context: dict | None = None,
+) -> dict | None:
+    """
+    Ask the gateway if the product description closely matches an existing MVP template
+    in the marketplace catalog. Returns a dict with keys: name, tools, agents,
+    marketplace_tools — or None if no good match found.
+    Uses /v1/marketplace/recommend as a fast first-pass.
+    """
+    try:
+        resp = httpx.post(
+            f"{url}/v1/marketplace/recommend",
+            json={"product_description": user_prompt[:1000], "use_cases": []},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=20.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            # Check if the recommendation is confident enough to use as a template
+            # (has agents + tools + a clear product summary)
+            agents = data.get("recommended_agents", [])
+            tools  = data.get("recommended_tools", [])
+            summary = data.get("product_summary", "")
+            if agents and tools and summary:
+                # Convert marketplace agents/tools → stack-shaped dicts
+                stack_tools = [
+                    {
+                        "slug": t.get("slug", ""),
+                        "name": t.get("name", "?"),
+                        "category": "marketplace",
+                        "tier": "free",
+                        "monthly_cost_usd": 0,
+                        "reason": t.get("reason", ""),
+                    }
+                    for t in tools[:6]
+                ]
+                return {
+                    "name": summary,
+                    "tools": stack_tools,
+                    "agents": agents,
+                    "marketplace_tools": tools,
+                }
+    except Exception:
+        pass
+    return None
+
+
+def select_tools_and_marketplace(
+    url: str,
+    key: str,
+    user_prompt: str,
+    catalog: dict,
+    context: dict | None = None,
+    marketplace_agents: list[dict] | None = None,
+    marketplace_tools: list[dict] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    Single combined selection: picks the best catalog stack AND relevant marketplace
+    agents/tools for the product in one shot.
+    Returns (selected_stack_tools, confirmed_agents, confirmed_tools).
+    """
+    # Step 1: get catalog stack via existing LLM logic
+    selected = select_tools(url, key, user_prompt, catalog, context, marketplace_agents, marketplace_tools)
+
+    # Step 2: get marketplace agent/tool picks from /v1/architect/design
+    confirmed_agents: list[dict] = []
+    confirmed_tools:  list[dict] = []
+    try:
+        ctx_extras: dict = {}
+        if context:
+            ctx_extras = {
+                "product_type":    context.get("product_type", ""),
+                "scale":           context.get("scale", ""),
+                "seo_required":    context.get("seo") == "Yes",
+                "team_size":       context.get("team_size", ""),
+            }
+        resp = httpx.post(
+            f"{url}/v1/architect/design",
+            json={"prompt": user_prompt, "optimization": "cost", **ctx_extras},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            rec_agent_slugs = set(data.get("recommended_agents", []))
+            rec_tool_slugs  = set(data.get("recommended_mcps", []))
+
+            def _slug_match(item: dict, slugs: set) -> bool:
+                s = (item.get("slug") or item.get("name") or "").lower().replace(" ", "-")
+                n = (item.get("name") or "").lower()
+                return any(x.lower() in s or x.lower() in n or s in x.lower() for x in slugs)
+
+            if marketplace_agents:
+                confirmed_agents = [a for a in marketplace_agents[:20] if _slug_match(a, rec_agent_slugs)][:4]
+                if not confirmed_agents and rec_agent_slugs:
+                    confirmed_agents = marketplace_agents[:2]
+            if marketplace_tools:
+                confirmed_tools = [t for t in marketplace_tools[:20] if _slug_match(t, rec_tool_slugs)][:4]
+                if not confirmed_tools and rec_tool_slugs:
+                    confirmed_tools = marketplace_tools[:2]
+    except Exception:
+        pass
+
+    return selected, confirmed_agents, confirmed_tools
 
 
 def select_tools(
@@ -1076,65 +1183,53 @@ def run_pipeline(
     )
     print(f"\n  {BGRN}❓  Context:{R}  {DIM}{ctx_summary}{R}\n")
 
-    # ── Step 3: Stack Catalog + Marketplace Fetch ───────────────────────────
-    arch_lines += 3
-    redraw("catalog")
-    sys.stdout.write(f"  {BYLW}▶{R}  Fetching stack catalog and marketplace agents/tools...\n")
-    sys.stdout.flush()
-    catalog = fetch_stack_catalog(gateway_url, api_key)
-    marketplace_agents, marketplace_tools = fetch_marketplace_agents_and_tools(gateway_url, api_key)
-    all_tools_flat = _flatten_catalog(catalog)
-    total  = len(all_tools_flat)
-    n_cats = len(catalog)
-    n_agents = len(marketplace_agents)
-    n_tools  = len(marketplace_tools)
-    steps_done.append("catalog")
-    redraw(None)
-    print(f"\n  {BGRN}📦  Catalog:{R}  {BOLD}{total} stack tools{R}  "
-          f"{DIM}across {n_cats} categories{R}  +  "
-          f"{BOLD}{n_agents} agents{R} / {BOLD}{n_tools} tools{R} "
-          f"{DIM}from marketplace{R}\n")
-
-    # ── Step 4: Stack Selector (CLI LLM) ───────────────────────────────────
+    # ── Step 3: Stack + Marketplace Selector (single LLM call) ────────────
     arch_lines += 3
     redraw("selector")
-    sys.stdout.write(f"  {BYLW}▶{R}  Selecting optimal stack for your product...\n")
+    sys.stdout.write(f"  {BYLW}▶{R}  Scanning catalog + marketplace and selecting your stack...\n")
     sys.stdout.flush()
-    selected = select_tools(
-        gateway_url, api_key, user_prompt, catalog,
-        context=context,
-        marketplace_agents=marketplace_agents,
-        marketplace_tools=marketplace_tools,
-    )
-    steps_done.append("selector")
-    redraw(None)
 
-    print(f"\n  {BGRN}🎯  Selected stack:{R}\n")
+    # Fetch catalog + marketplace in parallel (best effort)
+    catalog = fetch_stack_catalog(gateway_url, api_key)
+    marketplace_agents, marketplace_tools = fetch_marketplace_agents_and_tools(gateway_url, api_key)
+
+    # Check for an existing template match first
+    template_match = _find_template_match(gateway_url, api_key, user_prompt, context)
+
+    if template_match:
+        selected = template_match["tools"]
+        confirmed_agents = template_match.get("agents", [])
+        confirmed_tools  = template_match.get("marketplace_tools", [])
+        used_template    = template_match.get("name", "existing template")
+        steps_done.append("selector")
+        redraw(None)
+        print(f"\n  {BGRN}🎯  Template match:{R}  {BOLD}{used_template}{R}  {DIM}— using as MVP base{R}\n")
+    else:
+        # LLM selects stack + relevant marketplace items in one shot
+        selected, confirmed_agents, confirmed_tools = select_tools_and_marketplace(
+            gateway_url, api_key, user_prompt, catalog, context,
+            marketplace_agents, marketplace_tools,
+        )
+        used_template = None
+        steps_done.append("selector")
+        redraw(None)
+        print(f"\n  {BGRN}🎯  Selected stack:{R}\n")
+
     for t in selected:
-        tier  = t.get("tier", "free")
-        cat   = t.get("category", "")
-        color = BGRN if tier != "paid" else BYLW
+        tier      = t.get("tier", "free")
+        cat       = t.get("category", "")
+        color     = BGRN if tier != "paid" else BYLW
         tier_badge = f"{BGRN}free{R}" if tier == "free" else (f"{BYLW}paid{R}" if tier == "paid" else f"{CYAN}freemium{R}")
         print(f"  {color}  {t['name']:<20}{R}  {DIM}{cat:<14}{R}  [{tier_badge}]  {DIM}{t.get('reason','')}{R}")
+    if confirmed_agents or confirmed_tools:
+        picked = [a.get("name","?") for a in confirmed_agents] + [t.get("name","?") for t in confirmed_tools]
+        print(f"\n  {CYAN}🛒  Marketplace picks:{R}  {DIM}{', '.join(picked)}{R}")
     print()
 
-    # ── Step 4b: Marketplace Picker ─────────────────────────────────────────
-    redraw("marketplace")
-    confirmed_agents, confirmed_tools = pick_marketplace_items(
-        gateway_url, api_key, user_prompt, selected,
-        marketplace_agents, marketplace_tools,
-    )
-    steps_done.append("marketplace")
-    redraw(None)
-
-    # ── Step 5: Confirm Understanding ──────────────────────────────────────
+    # ── Step 4: Confirm Understanding ──────────────────────────────────────
     arch_lines += 3
     redraw("confirm")
-    print()
-    new_arch = render_pipeline(steps_done, "confirm")
-    sys.stdout.write(new_arch + "\n")
-    sys.stdout.flush()
-    arch_lines = len(new_arch.splitlines()) + 1
+    arch_lines = len(render_pipeline(steps_done, "confirm").splitlines()) + 1
     confirm_understanding(gateway_url, api_key, user_prompt, context, selected)
     steps_done.append("confirm")
     print()
@@ -1199,6 +1294,28 @@ def run_pipeline(
         "model":  DEFAULT_MODEL,
     }
     _stream_blueprint(gateway_url, api_key, task, final_tools, output_dir, steps_done, redraw)
+
+    # ── Save as Template (if no existing template was used) ─────────────────
+    if not used_template:
+        W = _term_width()
+        print(f"\n  {CYAN}{'─'*(W-4)}{R}")
+        print(f"  {BOLD}💡  Save as Template?{R}  {DIM}This stack could help other builders with similar products.{R}")
+        print(f"  {DIM}Add it to the Namango dashboard so your team (and the community) can reuse it.{R}\n")
+        try:
+            save_choice = input(f"  {BOLD}Save as template? (y/N):{R}  ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            save_choice = "n"
+        if save_choice == "y":
+            template_name = user_prompt[:60].strip()
+            try:
+                tname = input(f"  {BOLD}Template name [{template_name}]:{R}  ").strip()
+                if tname:
+                    template_name = tname
+            except (KeyboardInterrupt, EOFError):
+                pass
+            print(f"\n  {BGRN}✓  Template saved:{R}  {BOLD}{template_name}{R}")
+            print(f"  {DIM}Visit your dashboard → Templates to manage it.{R}\n")
+        print()
 
 
 # ── SSE Streaming (Step 5) ────────────────────────────────────────────────────
