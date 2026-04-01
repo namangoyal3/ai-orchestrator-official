@@ -142,7 +142,41 @@ STACK_CATALOG: dict[str, list[dict]] = {
 # ── Terminal helpers ──────────────────────────────────────────────────────────
 
 def _term_width() -> int:
-    return max(60, min(72, shutil.get_terminal_size(fallback=(80, 24)).columns - 4))
+    return max(60, min(80, shutil.get_terminal_size(fallback=(80, 24)).columns - 4))
+
+
+_ANSI_RE = re.compile(r'\033\[[0-9;]*m')
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub('', s)
+
+def _vis(s: str) -> int:
+    """Visible terminal width of a string: strip ANSI, count wide chars as 2."""
+    plain = _strip_ansi(s)
+    w = 0
+    for ch in plain:
+        cp = ord(ch)
+        # Wide unicode ranges: CJK, emoji, enclosed alphanumerics, misc symbols
+        if (0x1100 <= cp <= 0x115F or 0x2329 <= cp <= 0x232A or
+                0x2E80 <= cp <= 0x3247 or 0x3250 <= cp <= 0x4DBF or
+                0x4E00 <= cp <= 0xA4C6 or 0xA960 <= cp <= 0xA97C or
+                0xAC00 <= cp <= 0xD7A3 or 0xF900 <= cp <= 0xFAFF or
+                0xFE10 <= cp <= 0xFE19 or 0xFE30 <= cp <= 0xFE6B or
+                0xFF01 <= cp <= 0xFF60 or 0xFFE0 <= cp <= 0xFFE6 or
+                0x1B000 <= cp <= 0x1B001 or 0x1F004 <= cp <= 0x1F0CF or
+                0x1F18E <= cp <= 0x1F9FF or 0x20000 <= cp <= 0x2FFFD or
+                0x30000 <= cp <= 0x3FFFD):
+            w += 2
+        elif cp == 0xFE0F:  # variation selector (makes emoji wide) — skip
+            pass
+        else:
+            w += 1
+    return w
+
+def _pad_to(s: str, target: int, fill: str = " ") -> str:
+    """Pad string s (which may contain ANSI) to target visible width."""
+    need = target - _vis(s)
+    return s + fill * max(0, need)
 
 
 # ── Context Questions ─────────────────────────────────────────────────────────
@@ -492,50 +526,68 @@ def catch_issues(
 # ── Pipeline Renderer ─────────────────────────────────────────────────────────
 
 def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: str = "") -> str:
-    """Render the Namango 5-step stack intelligence pipeline."""
+    """Render the Namango pipeline box with pixel-perfect alignment."""
     W = _term_width()
+    inner = W - 2  # chars between ║ ... ║
 
     NODES = [
         ("intent",    "🧠  Intent Analyzer"),
         ("questions", "❓  Context Questions"),
         ("selector",  "🎯  Stack + Marketplace Selector"),
         ("confirm",   "✅  Confirm Understanding"),
-        ("catch",     "⚠️   Pre-build Check"),
+        ("catch",     "⚠️  Pre-build Check"),
         ("budget",    "💰  Cost Advisor"),
-        ("blueprint", "🏗️   Blueprint Builder"),
+        ("blueprint", "🏗  Blueprint Builder"),
     ]
 
+    def box_row(content: str) -> str:
+        """Wrap content in ║ ... ║, padding to exactly `inner` visible chars."""
+        return f"{CYAN}║{R}{_pad_to(content, inner)}{CYAN}║{R}"
+
     lines = []
-    lines.append(f"{CYAN}╔{'═' * (W-2)}╗{R}")
-    title = "  NAMANGO — STACK INTELLIGENCE"
-    lines.append(f"{CYAN}║{BOLD}{title:^{W-2}}{R}{CYAN}║{R}")
+    lines.append(f"{CYAN}╔{'═' * inner}╗{R}")
+
+    # Title — center in inner width, no ANSI inside the centering target
+    title = "NAMANGO — STACK INTELLIGENCE"
+    lines.append(box_row(f"{BOLD}{title.center(inner)}{R}"))
+
     if subtitle:
-        short = subtitle if len(subtitle) <= W - 6 else subtitle[:W-9] + "..."
-        lines.append(f"{CYAN}║{R}  {DIM}{short}{R}")
-    lines.append(f"{CYAN}╠{'═' * (W-2)}╣{R}")
+        short = subtitle if _vis(subtitle) <= inner - 4 else _strip_ansi(subtitle)[:inner-7] + "..."
+        lines.append(box_row(f"  {DIM}{short}{R}"))
+
+    lines.append(f"{CYAN}╠{'═' * inner}╣{R}")
+
+    # Status badge widths are all 10 visible chars — kept consistent
+    STATUS = {
+        "active":  (f"{BYLW}▶ RUNNING{R}", BYLW),
+        "done":    (f"{BGRN}✓ DONE   {R}", BGRN),
+        "pending": (f"{DIM}○ PENDING{R}", DIM),
+    }
+
+    LABEL_W = 32  # visible target width for label column
 
     for i, (step_id, label) in enumerate(NODES):
-        is_done   = step_id in steps_done
-        is_active = step_id == active_step
-
-        if is_active:
-            status = f"{BYLW}▶ RUNNING {R}"
-            color  = BYLW
-        elif is_done:
-            status = f"{BGRN}✓ DONE    {R}"
-            color  = BGRN
+        if step_id == active_step:
+            badge_str, color = STATUS["active"]
+        elif step_id in steps_done:
+            badge_str, color = STATUS["done"]
         else:
-            status = f"{DIM}○ PENDING {R}"
-            color  = DIM
+            badge_str, color = STATUS["pending"]
 
-        node_str = f"{color}{label:<26}{R}"
-        lines.append(f"{CYAN}║{R}  {node_str}  {status}  {CYAN}║{R}")
+        # Build label with color, padded to LABEL_W visible chars
+        colored_label = f"{color}{label}{R}"
+        padded_label  = _pad_to(colored_label, LABEL_W)
+
+        # Row: 2 spaces + label(LABEL_W) + 2 spaces + badge(10) + 2 spaces
+        content = f"  {padded_label}  {badge_str}  "
+        lines.append(box_row(content))
 
         if i < len(NODES) - 1:
             arrow_color = GRN if step_id in steps_done else DIM
-            lines.append(f"{CYAN}║{R}  {arrow_color}{'':4}↓{R}{'':50}  {CYAN}║{R}")
+            arrow_content = f"  {arrow_color}    ↓{R}"
+            lines.append(box_row(arrow_content))
 
-    lines.append(f"{CYAN}╚{'═' * (W-2)}╝{R}")
+    lines.append(f"{CYAN}╚{'═' * inner}╝{R}")
     return "\n".join(lines)
 
 
@@ -1473,13 +1525,15 @@ def _stream_blueprint(
 def _pretty_print_response(text: str, width: int = 72) -> None:
     in_code = False
     lang = ""
+    wrap_w = max(40, width - 4)
     for line in text.split("\n"):
         if line.startswith("```"):
             if not in_code:
                 in_code = True
-                lang = line[3:].strip()
-                fence = f"  {CYAN}┌─ {lang or 'code'} {'─'*(width-8-len(lang or 'code'))}┐{R}"
-                print(fence)
+                lang = line[3:].strip() or "code"
+                header = f"┌─ {lang} "
+                dashes = max(2, width - 4 - len(header) - 1)
+                print(f"  {CYAN}{header}{'─'*dashes}┐{R}")
             else:
                 in_code = False
                 print(f"  {CYAN}└{'─'*(width-4)}┘{R}")
@@ -1489,6 +1543,10 @@ def _pretty_print_response(text: str, width: int = 72) -> None:
                 hl = hl.replace(kw, f"{MAG}{kw}{R}")
             for kw in ("if ", "else:", "elif ", "for ", "while ", "try:", "except ", "with ", "raise "):
                 hl = hl.replace(kw, f"{BBLU}{kw}{R}")
+            # Truncate long code lines rather than wrapping (preserves structure)
+            plain = _strip_ansi(hl)
+            if len(plain) > wrap_w:
+                hl = plain[:wrap_w - 1] + "…"
             print(f"  {DIM}│{R} {hl}")
         else:
             if line.startswith("## "):
@@ -1498,10 +1556,17 @@ def _pretty_print_response(text: str, width: int = 72) -> None:
             elif line.startswith("**") and line.endswith("**"):
                 print(f"  {BOLD}{line[2:-2]}{R}")
             elif line.startswith("- ") or line.startswith("* "):
-                print(f"  {CYAN}•{R} {line[2:]}")
+                bullet = line[2:]
+                if len(bullet) > wrap_w - 2:
+                    wrapped = textwrap.wrap(bullet, wrap_w - 2)
+                    print(f"  {CYAN}•{R} {wrapped[0]}")
+                    for cont in wrapped[1:]:
+                        print(f"    {cont}")
+                else:
+                    print(f"  {CYAN}•{R} {bullet}")
             else:
-                if len(line) > width - 4:
-                    for wrapped in textwrap.wrap(line, width - 4):
+                if len(line) > wrap_w:
+                    for wrapped in textwrap.wrap(line, wrap_w):
                         print(f"  {wrapped}")
                 else:
                     print(f"  {line}")
