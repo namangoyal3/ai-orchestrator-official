@@ -224,13 +224,13 @@ def fetch_marketplace_agents_and_tools(url: str, key: str) -> tuple[list[dict], 
     agents: list[dict] = []
     tools:  list[dict] = []
     try:
-        r = httpx.get(f"{url}/v1/agents", headers={"X-API-Key": key}, timeout=5.0)
+        r = httpx.get(f"{url}/v1/marketplace/agents", headers={"X-API-Key": key}, timeout=5.0)
         if r.status_code == 200:
             agents = r.json().get("agents", [])
     except Exception:
         pass
     try:
-        r = httpx.get(f"{url}/v1/tools", headers={"X-API-Key": key}, timeout=5.0)
+        r = httpx.get(f"{url}/v1/marketplace/tools", headers={"X-API-Key": key}, timeout=5.0)
         if r.status_code == 200:
             tools = r.json().get("tools", [])
     except Exception:
