@@ -382,7 +382,6 @@ export default function TemplatesPage() {
       <Header
         title="Templates"
         subtitle="Production-ready MVP stacks — pick one and start building"
-        icon={<LayoutTemplate size={18} className="text-brand-400" />}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
