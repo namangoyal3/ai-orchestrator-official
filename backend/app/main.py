@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import init_db
 from app.api import gateway, agents, tools, keys, analytics, marketplace, architect, stacks
 from app.seed import seed_database
+from app.seed_marketplace import seed_marketplace
 from app.scraper import RepoScraper
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     await seed_database()
+    await seed_marketplace()
 
     # Start background scraper scheduler
     try:

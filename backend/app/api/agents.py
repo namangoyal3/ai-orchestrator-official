@@ -35,7 +35,6 @@ async def list_agents(
     ]
 
     # Custom agents from DB
-    _, org = auth
     result = await db.execute(
         select(Agent).where(Agent.is_active == True)
     )

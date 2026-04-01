@@ -252,6 +252,22 @@ def route_llm(
         if choice.provider.value in available:
             return choice
 
+    # Last resort: route via OpenRouter with a sensible default model
+    if "openrouter" in available:
+        fallback_model = "meta-llama/llama-3.1-70b-instruct"
+        if complexity == ComplexityLevel.HIGH:
+            fallback_model = "anthropic/claude-3.5-sonnet"
+        elif complexity == ComplexityLevel.MEDIUM:
+            fallback_model = "openai/gpt-4o-mini"
+        return LLMChoice(
+            provider=LLMProvider.OPENROUTER,
+            model_id=fallback_model,
+            display_name=fallback_model,
+            reason="OpenRouter fallback — no direct provider keys configured",
+            cost_per_1m_input=0,
+            cost_per_1m_output=0,
+        )
+
     raise RuntimeError("No LLM providers available. Please configure at least one API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, or AWS credentials).")
 
 
