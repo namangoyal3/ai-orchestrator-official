@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Terminal, Bot, Wrench, Key,
-  BarChart2, Zap, ExternalLink, Radio, Store, Layers,
+  BarChart2, Zap, ExternalLink, Radio, Store, Layers, LayoutTemplate,
 } from "lucide-react";
 import clsx from "clsx";
 import { API_BASE, getApiKey } from "@/lib/api";
@@ -13,7 +13,8 @@ const MAIN_NAV = [
   { href: "/",            label: "Dashboard",   icon: LayoutDashboard },
   { href: "/playground",  label: "Playground",  icon: Terminal },
   { href: "/marketplace", label: "Marketplace", icon: Store },
-  { href: "/stacks",      label: "Stacks",      icon: Layers, badge: "NEW" },
+  { href: "/stacks",      label: "Stacks",      icon: Layers,          badge: "NEW" },
+  { href: "/templates",   label: "Templates",   icon: LayoutTemplate,  badge: "NEW" },
 ];
 
 const MANAGEMENT_NAV: { href: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; badge?: string }[] = [
