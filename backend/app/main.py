@@ -39,13 +39,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to start scraper scheduler: {e}")
     
     yield
-    
-    # Shutdown
-    if scheduler.running:
-        scheduler.shutdown()
->>>>>>> 2263a91f3cf3cc379784b9d146f49f6173f692da
-    yield
-    
+
     # Shutdown
     if scheduler.running:
         scheduler.shutdown()
