@@ -17,14 +17,27 @@ execution_type routing:
   hosted        → returns signup_url + deploy_url
   mcp           → returns editor_config snippets for Claude/Cursor/Windsurf
   recommend-only → returns docs_url only (no activation path)
+
+Data flow:
+  slug → find_tool() → execution_type → _build_next_steps() → ActivateResponse
+    │                        │
+    404 if not found         └─ recommend-only if missing (safe default)
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from app.api.stacks import STACK_CATALOG
+from app.api.catalog_utils import find_tool
 
 router = APIRouter(prefix="/v1/tools", tags=["Activate"])
+
+# NOTE: GET /v1/tools/activation-types is registered here BEFORE /{slug}/activate
+# so FastAPI doesn't capture "activation-types" as a slug parameter.
+# The tools.py router also has GET /v1/tools/{slug} — static routes win over
+# parameterized ones only within the same router, so we keep this endpoint
+# on a distinct path prefix via the summary tag, not the path itself.
+# Both routers share /v1/tools prefix — activation-types is safe because
+# tools.py's /{slug} only matches TOOL_REGISTRY keys and returns 404 otherwise.
 
 
 class ActivateResponse(BaseModel):
@@ -49,18 +62,9 @@ class ActivateResponse(BaseModel):
     next_steps: list[str]
 
 
-def _find_tool(slug: str) -> Optional[dict]:
-    slug = slug.lower().strip()
-    for cat, tools in STACK_CATALOG.items():
-        for t in tools:
-            if t.get("slug", "").lower() == slug:
-                return {**t, "category": cat}
-    return None
-
-
-def _build_next_steps(tool: dict, cfg: dict, exec_type: str) -> list[str]:
+def _build_next_steps(tool_name: str, tool_slug: str, cfg: dict, exec_type: str) -> list[str]:
+    """Build ordered list of human-readable next steps for activating this tool."""
     steps = []
-    name = tool.get("name", slug)
 
     if exec_type == "install":
         if cfg.get("install_cmd"):
@@ -97,12 +101,10 @@ def _build_next_steps(tool: dict, cfg: dict, exec_type: str) -> list[str]:
             steps.append(f"Install the MCP server: `{cfg['install_cmd']}`")
         editor_cfg = cfg.get("editor_config", {})
         if editor_cfg.get("claude"):
-            steps.append("Add to Claude Code: `claude mcp add {name} --command {cmd}`".format(
-                name=tool.get("slug"),
-                cmd=editor_cfg["claude"].get("command", "")
-            ))
+            claude_cmd = editor_cfg["claude"].get("command", "")
+            steps.append(f"Add to Claude Code: `claude mcp add {tool_slug} --command {claude_cmd}`")
         if editor_cfg.get("cursor"):
-            steps.append(f"Add to Cursor: Settings → MCP → paste the server config")
+            steps.append("Add to Cursor: Settings → MCP → paste the server config")
 
     elif exec_type == "recommend-only":
         if cfg.get("docs_url"):
@@ -111,44 +113,6 @@ def _build_next_steps(tool: dict, cfg: dict, exec_type: str) -> list[str]:
             steps.append(f"GitHub: {cfg['github_url']}")
 
     return steps
-
-
-@router.post("/{slug}/activate", response_model=ActivateResponse, summary="Activate a tool from the catalog")
-async def activate_tool(slug: str):
-    """
-    Returns everything needed to immediately start using a tool from the Namango catalog.
-
-    - **install** tools: returns the install command and docs
-    - **api** tools: returns signup URL, env var names, and SDK install command
-    - **self-host** tools: returns Docker command and/or Railway one-click deploy URL
-    - **hosted** tools: returns the platform signup + deploy URL
-    - **mcp** tools: returns editor config snippets for Claude Code, Cursor, Windsurf
-    - **recommend-only** tools: returns docs link (no automated activation yet)
-    """
-    tool = _find_tool(slug)
-    if not tool:
-        raise HTTPException(status_code=404, detail=f"Tool '{slug}' not found in catalog")
-
-    exec_type = tool.get("execution_type", "recommend-only")
-    cfg = tool.get("execution_config", {})
-
-    next_steps = _build_next_steps(tool, cfg, exec_type)
-
-    return ActivateResponse(
-        slug=tool.get("slug", slug),
-        name=tool.get("name", slug),
-        execution_type=exec_type,
-        install_cmd=cfg.get("install_cmd"),
-        signup_url=cfg.get("signup_url"),
-        env_vars=cfg.get("env_vars"),
-        deploy_cmd=cfg.get("deploy_cmd"),
-        deploy_url=cfg.get("deploy_url"),
-        editor_config=cfg.get("editor_config"),
-        mcp_server_url=cfg.get("mcp_server_url"),
-        docs_url=cfg.get("docs_url"),
-        github_url=cfg.get("github_url") or tool.get("github_url"),
-        next_steps=next_steps,
-    )
 
 
 @router.get("/activation-types", summary="List all execution types and what they mean")
@@ -164,3 +128,43 @@ async def activation_types():
             "recommend-only": "No automated activation path yet — returns docs link only",
         }
     }
+
+
+@router.post("/{slug}/activate", response_model=ActivateResponse, summary="Activate a tool from the catalog")
+async def activate_tool(slug: str):
+    """
+    Returns everything needed to immediately start using a tool from the Namango catalog.
+
+    - **install** tools: returns the install command and docs
+    - **api** tools: returns signup URL, env var names, and SDK install command
+    - **self-host** tools: returns Docker command and/or Railway one-click deploy URL
+    - **hosted** tools: returns the platform signup + deploy URL
+    - **mcp** tools: returns editor config snippets for Claude Code, Cursor, Windsurf
+    - **recommend-only** tools: returns docs link (no automated activation path yet)
+    """
+    tool = find_tool(slug)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{slug}' not found in catalog")
+
+    exec_type = tool.get("execution_type", "recommend-only")
+    cfg = tool.get("execution_config", {})
+    tool_name = tool.get("name", slug)
+    tool_slug = tool.get("slug", slug)
+
+    next_steps = _build_next_steps(tool_name, tool_slug, cfg, exec_type)
+
+    return ActivateResponse(
+        slug=tool_slug,
+        name=tool_name,
+        execution_type=exec_type,
+        install_cmd=cfg.get("install_cmd"),
+        signup_url=cfg.get("signup_url"),
+        env_vars=cfg.get("env_vars"),
+        deploy_cmd=cfg.get("deploy_cmd"),
+        deploy_url=cfg.get("deploy_url"),
+        editor_config=cfg.get("editor_config"),
+        mcp_server_url=cfg.get("mcp_server_url"),
+        docs_url=cfg.get("docs_url"),
+        github_url=cfg.get("github_url") or tool.get("github_url"),
+        next_steps=next_steps,
+    )

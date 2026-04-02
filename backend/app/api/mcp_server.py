@@ -15,6 +15,7 @@ Tools exposed:
 Discovery: GET /.well-known/mcp.json
 """
 import logging
+import os
 from typing import Any, Optional
 
 import httpx
@@ -22,6 +23,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.api.stacks import STACK_CATALOG
+from app.api.catalog_utils import find_tool, flatten_catalog, relevance_score, prompt_to_words
 
 logger = logging.getLogger(__name__)
 
@@ -102,23 +104,6 @@ TOOLS = [
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _flatten_catalog(catalog: dict) -> list[dict]:
-    result = []
-    for cat, tools in catalog.items():
-        for t in tools:
-            result.append({**t, "category": t.get("category") or cat})
-    return result
-
-
-def _find_tool(slug: str) -> Optional[dict]:
-    slug = slug.lower().strip()
-    for cat, tools in STACK_CATALOG.items():
-        for t in tools:
-            if t.get("slug", "").lower() == slug or t.get("name", "").lower() == slug:
-                return {**t, "category": cat}
-    return None
-
-
 def _catalog_result(category: Optional[str]) -> dict:
     if category:
         tools = STACK_CATALOG.get(category, [])
@@ -137,29 +122,25 @@ def _catalog_result(category: Optional[str]) -> dict:
     return {"total_tools": total, "categories": list(STACK_CATALOG.keys()), "catalog": summary}
 
 
+def _openrouter_key() -> str:
+    """Read OpenRouter API key from env — never hardcode credentials."""
+    from app.config import settings
+    key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "")
+    return key
+
+
 async def _recommend_stack(prompt: str, context: Optional[dict]) -> dict:
-    """Call the gateway's /v1/query endpoint to get stack recommendations."""
-    import re as _re
+    """Rank and select a tech stack for the given product prompt."""
+    all_tools = flatten_catalog(STACK_CATALOG)
 
-    all_tools = _flatten_catalog(STACK_CATALOG)
+    # Relevance pre-ranking via shared utility
+    prompt_words = prompt_to_words(prompt)
+    sorted_tools = sorted(all_tools, key=lambda t: relevance_score(t, prompt_words), reverse=True)
 
-    # Relevance pre-ranking
-    prompt_words = set(_re.sub(r"[^a-z0-9 ]", "", prompt.lower()).split())
-
-    def _score(t: dict) -> int:
-        text = (
-            (t.get("description") or "") + " " +
-            (t.get("category") or "") + " " +
-            " ".join(t.get("use_case_tags", []))
-        ).lower()
-        return sum(1 for w in prompt_words if w in text)
-
-    sorted_tools = sorted(all_tools, key=_score, reverse=True)
-
-    # Build prompt lines
+    # Build prompt lines with relevance labels
     lines = []
     for t in sorted_tools:
-        score = _score(t)
+        score = relevance_score(t, prompt_words)
         label = f" [relevance:{score}]" if score > 0 else ""
         oss = " [OSS]" if t.get("tier") == "free" else ""
         lines.append(f"[{t.get('category','?')}] {t.get('name','?')}: {(t.get('description') or '')[:65]} (tier={t.get('tier','free')}{oss}){label}")
@@ -190,7 +171,7 @@ async def _recommend_stack(prompt: str, context: Optional[dict]) -> dict:
             resp = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": "Bearer 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",
+                    "Authorization": f"Bearer {_openrouter_key()}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -232,7 +213,7 @@ async def _recommend_stack(prompt: str, context: Optional[dict]) -> dict:
 
 
 async def _explain_tool(slug: str, product_context: Optional[str]) -> dict:
-    tool = _find_tool(slug)
+    tool = find_tool(slug)
     if not tool:
         return {"error": f"Tool '{slug}' not found in catalog. Use get_catalog to see available tools."}
 
@@ -246,7 +227,7 @@ async def _explain_tool(slug: str, product_context: Optional[str]) -> dict:
             resp = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": "Bearer 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",
+                    "Authorization": f"Bearer {_openrouter_key()}",
                     "Content-Type": "application/json",
                 },
                 json={
