@@ -778,22 +778,10 @@ def select_tools(
         ]
         ctx_block = "Product context (use this to guide tool selection):\n" + "\n".join(ctx_lines) + "\n\n"
 
-    # Append marketplace agents/tools as additional OSS options
+    # Marketplace agents/tools are NOT injected into stack selection —
+    # they are separate AI add-ons, not core infrastructure tools.
+    # Stack selection must only draw from the curated stack catalog.
     mp_block = ""
-    if marketplace_agents:
-        agent_lines = [
-            f"  [agent] {a.get('name','?')}: {(a.get('description') or '')[:70]}"
-            for a in marketplace_agents[:12]
-        ]
-        mp_block += "Available AI agents from the Namango marketplace (consider recommending relevant ones):\n"
-        mp_block += "\n".join(agent_lines) + "\n\n"
-    if marketplace_tools:
-        tool_lines = [
-            f"  [tool] {t.get('name','?')}: {(t.get('description') or '')[:70]}"
-            for t in marketplace_tools[:12]
-        ]
-        mp_block += "Available AI tools from the Namango marketplace:\n"
-        mp_block += "\n".join(tool_lines) + "\n\n"
 
     selection_prompt = (
         f"You are the Namango Stack Selector — a principal engineer and CTO advisor who has designed production stacks for 100+ products across fintech, SaaS, consumer apps, and developer tools. You pick the minimal, coherent stack that best fits this specific product — not a generic boilerplate.\n\n"
@@ -989,16 +977,8 @@ def _build_blueprint_prompt(
 
     # Marketplace agents section (generic hints — lower priority than confirmed picks)
     agents_section = ""
-    if marketplace_agents and not confirmed_agents:
-        relevant = [
-            f"  - {a.get('name','?')}: {(a.get('description') or '')[:80]}"
-            for a in marketplace_agents[:10]
-        ]
-        agents_section = (
-            f"AVAILABLE NAMANGO AI AGENTS (OSS — mention the relevant ones in the blueprint "
-            f"under a 'AI Agents' section so the developer knows which to wire in):\n"
-            + "\n".join(relevant) + "\n\n"
-        )
+    # Only show agents in blueprint if user explicitly confirmed them from marketplace picker
+    pass
 
     # User-confirmed marketplace picks — these MUST appear in the blueprint
     confirmed_section = ""
