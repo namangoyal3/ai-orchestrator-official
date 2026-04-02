@@ -17,3 +17,7 @@ frontend/.next/
 frontend/out/
 .gstack/
 .worktrees/
+
+# Generated CLI output
+namango-output/
+backend/namango-output/
