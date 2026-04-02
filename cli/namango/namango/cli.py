@@ -1247,7 +1247,15 @@ def run_pipeline(
         # Template match gives marketplace tools (agents/MCPs) — still need
         # the real tech stack from LLM selector. Marketplace tools go to confirmed_tools.
         confirmed_agents = template_match.get("agents", [])
-        confirmed_tools  = template_match.get("marketplace_tools", []) + template_match.get("tools", [])
+        # Deduplicate marketplace tools by slug/name
+        _seen_mp: set[str] = set()
+        _raw_mp = template_match.get("marketplace_tools", []) + template_match.get("tools", [])
+        confirmed_tools = []
+        for _t in _raw_mp:
+            _key = (_t.get("slug") or _t.get("name") or "").lower()
+            if _key and _key not in _seen_mp:
+                _seen_mp.add(_key)
+                confirmed_tools.append(_t)
         used_template    = template_match.get("name", "existing template")
         # Run LLM selector to get proper tech stack (DB, frontend, backend, auth, notifications)
         selected, _, _ = select_tools_and_marketplace(
