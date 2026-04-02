@@ -742,10 +742,17 @@ def select_tools(
         ]
         ctx_block = "Product context (use this to guide tool selection):\n" + "\n".join(ctx_lines) + "\n\n"
 
-    # Marketplace agents/tools are NOT injected into stack selection —
-    # they are separate AI add-ons, not core infrastructure tools.
-    # Stack selection must only draw from the curated stack catalog.
+    # Marketplace tools ARE included in stack selection as additional options.
+    # Only marketplace AI agents (MCP servers) are excluded — they are add-ons,
+    # not core infrastructure. Real tech tools from marketplace belong in the stack.
     mp_block = ""
+    if marketplace_tools:
+        tool_lines = [
+            f"  [{t.get('category', 'tool')}] {t.get('name','?')}: {(t.get('description') or '')[:70]} (tier={t.get('tier','free')})"
+            for t in marketplace_tools[:20]
+        ]
+        mp_block += "Additional tools available from the Namango marketplace catalog (real tech tools — include relevant ones in your stack selection):\n"
+        mp_block += "\n".join(tool_lines) + "\n\n"
 
     selection_prompt = (
         f"You are the Namango Stack Selector — a principal engineer and CTO advisor who has designed production stacks for 100+ products across fintech, SaaS, consumer apps, and developer tools. You pick the minimal, coherent stack that best fits this specific product — not a generic boilerplate.\n\n"
