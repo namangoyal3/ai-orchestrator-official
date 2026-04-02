@@ -1244,10 +1244,16 @@ def run_pipeline(
     template_match = _find_template_match(gateway_url, api_key, user_prompt, context)
 
     if template_match:
-        selected = template_match["tools"]
+        # Template match gives marketplace tools (agents/MCPs) — still need
+        # the real tech stack from LLM selector. Marketplace tools go to confirmed_tools.
         confirmed_agents = template_match.get("agents", [])
-        confirmed_tools  = template_match.get("marketplace_tools", [])
+        confirmed_tools  = template_match.get("marketplace_tools", []) + template_match.get("tools", [])
         used_template    = template_match.get("name", "existing template")
+        # Run LLM selector to get proper tech stack (DB, frontend, backend, auth, notifications)
+        selected, _, _ = select_tools_and_marketplace(
+            gateway_url, api_key, user_prompt, catalog, context,
+            marketplace_agents, marketplace_tools,
+        )
         steps_done.append("selector")
         redraw(None)
         print(f"\n  {BGRN}🎯  Template match:{R}  {BOLD}{used_template}{R}  {DIM}— using as MVP base{R}\n")
@@ -1262,15 +1268,22 @@ def run_pipeline(
         redraw(None)
         print(f"\n  {BGRN}🎯  Selected stack:{R}\n")
 
+    if selected:
+        print(f"  {BOLD}Tech Stack:{R}\n")
     for t in selected:
         tier      = t.get("tier", "free")
         cat       = t.get("category", "")
         color     = BGRN if tier != "paid" else BYLW
         tier_badge = f"{BGRN}free{R}" if tier == "free" else (f"{BYLW}paid{R}" if tier == "paid" else f"{CYAN}freemium{R}")
         print(f"  {color}  {t['name']:<20}{R}  {DIM}{cat:<14}{R}  [{tier_badge}]  {DIM}{t.get('reason','')}{R}")
-    if confirmed_agents or confirmed_tools:
-        picked = [a.get("name","?") for a in confirmed_agents] + [t.get("name","?") for t in confirmed_tools]
-        print(f"\n  {CYAN}🛒  Marketplace picks:{R}  {DIM}{', '.join(picked)}{R}")
+    if confirmed_tools:
+        print(f"\n  {BOLD}Marketplace Tools:{R}\n")
+        for t in confirmed_tools:
+            cat = t.get("category", "marketplace")
+            print(f"  {CYAN}  {t.get('name','?'):<20}{R}  {DIM}{cat:<14}{R}  {DIM}{t.get('description','')[:60]}{R}")
+    if confirmed_agents:
+        picked = [a.get("name","?") for a in confirmed_agents]
+        print(f"\n  {CYAN}🤖  AI Agents:{R}  {DIM}{', '.join(picked)}{R}")
     print()
 
     # ── Step 4: Confirm Understanding ──────────────────────────────────────
