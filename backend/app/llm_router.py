@@ -252,9 +252,9 @@ def route_llm(
         if choice.provider.value in available:
             return choice
 
-    # Last resort: route via OpenRouter with a sensible default model
+    # Last resort: route via OpenRouter with a complexity-aware free model
     if "openrouter" in available:
-        fallback_model = "meta-llama/llama-3.1-70b-instruct"
+        fallback_model = "meta-llama/llama-3.3-70b-instruct:free"
         if complexity == ComplexityLevel.HIGH:
             fallback_model = "anthropic/claude-3.5-sonnet"
         elif complexity == ComplexityLevel.MEDIUM:
