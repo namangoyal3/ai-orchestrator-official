@@ -599,12 +599,13 @@ def render_pipeline(steps_done: list[str], active_step: str | None, subtitle: st
 
 def fetch_stack_catalog(url: str, key: str) -> dict[str, list[dict]]:
     """
-    Fetch the curated stack catalog from /v1/stacks.
+    Fetch the curated stack catalog from /v1/stacks, merged with marketplace tools.
     Falls back to the embedded STACK_CATALOG on any error.
 
     Returns a dict keyed by category (web, database, auth, ...) where
     each value is a list of tool dicts with slug/name/description/tier/monthly_cost_usd.
     """
+    catalog: dict[str, list[dict]] = {}
     try:
         r = httpx.get(
             f"{url}/v1/stacks",
@@ -615,10 +616,34 @@ def fetch_stack_catalog(url: str, key: str) -> dict[str, list[dict]]:
             data = r.json()
             categories = data.get("categories")
             if isinstance(categories, dict) and categories:
-                return categories
+                catalog = {k: list(v) for k, v in categories.items()}
     except Exception:
         pass
-    return STACK_CATALOG
+
+    # Merge marketplace tools
+    try:
+        r2 = httpx.get(
+            f"{url}/v1/marketplace/tools",
+            headers={"X-API-Key": key},
+            timeout=5.0,
+        )
+        if r2.status_code == 200:
+            tools = r2.json().get("tools", [])
+            for t in tools:
+                cat = t.get("category", "marketplace")
+                entry = {
+                    "slug": t.get("slug", ""),
+                    "name": t.get("name", ""),
+                    "description": t.get("description", ""),
+                    "tier": "freemium",
+                    "monthly_cost_usd": 0,
+                    "category": cat,
+                }
+                catalog.setdefault(cat, []).append(entry)
+    except Exception:
+        pass
+
+    return catalog if catalog else STACK_CATALOG
 
 
 def _flatten_catalog(catalog: dict[str, list[dict]]) -> list[dict]:
