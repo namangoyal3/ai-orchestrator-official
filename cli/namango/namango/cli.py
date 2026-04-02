@@ -744,7 +744,22 @@ def select_tools(
     """
     all_tools = _flatten_catalog(catalog)
 
-    # Build prompt lines: send full catalog, one per line, with category + tier + oss flag
+    # Relevance pre-ranking: score every tool against the user prompt via keyword overlap.
+    # This ensures the LLM sees the most relevant tools first regardless of catalog order.
+    import re as _re
+    prompt_words = set(_re.sub(r'[^a-z0-9 ]', '', user_prompt.lower()).split())
+
+    def _relevance(t: dict) -> int:
+        text = (
+            (t.get("description") or "") + " " +
+            (t.get("category") or "") + " " +
+            " ".join(t.get("use_case_tags", []))
+        ).lower()
+        return sum(1 for w in prompt_words if w in text)
+
+    all_tools = sorted(all_tools, key=_relevance, reverse=True)
+
+    # Build prompt lines: send full catalog sorted by relevance, one per line
     prompt_lines: list[str] = []
     for t in all_tools:
         cat   = t.get("category", "?")
@@ -752,7 +767,9 @@ def select_tools(
         desc  = (t.get("description") or "")[:65]
         tier  = t.get("tier", "free")
         oss   = " [OSS]" if tier == "free" else ""
-        prompt_lines.append(f"[{cat}] {name}: {desc} (tier={tier}{oss})")
+        score = _relevance(t)
+        relevance_label = f" [relevance:{score}]" if score > 0 else ""
+        prompt_lines.append(f"[{cat}] {name}: {desc} (tier={tier}{oss}){relevance_label}")
 
     # Build product context block
     ctx_block = ""
@@ -799,10 +816,7 @@ def select_tools(
         f"- Notifications → Resend or SendGrid for email; Novu for multi-channel; Firebase FCM for push\n"
         f"- Frontend → Next.js (SSR/SEO) or React + Vite (SPA); always pair with Tailwind CSS\n"
         f"- OSS-first for demos → prefer tools marked [OSS] when capability is equivalent\n"
-        f"- workflow automation / no-code / Zapier-like → MUST include n8n or Dify from [automation]\n"
-        f"- visual no-code app builder / drag-and-drop UI → MUST include Budibase or Coze Studio from [no-code-builder]\n"
-        f"- AI agents / autonomous workflows → MUST include CrewAI or Haystack from [agent-framework]\n"
-        f"- MCP / tool-calling / function-calling → MUST include FastAPI MCP or MCP Agent from [mcp]\n\n"
+        f"- Tools labeled [relevance:N] scored highest against the user's prompt — prioritize these\n\n"
         f"{ctx_block}"
         f"PRODUCT TO BUILD: {user_prompt}\n\n"
         f"AVAILABLE STACK CATALOG:\n"
