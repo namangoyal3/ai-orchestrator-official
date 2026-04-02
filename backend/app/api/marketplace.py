@@ -162,8 +162,10 @@ async def list_marketplace_tools(db: AsyncSession = Depends(get_db)):
             is_builtin=False,
         ))
 
-    # 2. Add Built-in Registry Tools
+    # 2. Add Built-in Registry Tools (skip hidden internal utilities)
     for slug, t in TOOL_REGISTRY.items():
+        if t.get("hidden"):
+            continue
         tools.append(ToolCard(
             slug=t["slug"],
             name=t["name"],

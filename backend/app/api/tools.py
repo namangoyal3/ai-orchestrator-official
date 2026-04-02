@@ -31,8 +31,9 @@ async def list_tools():
             "parameters": t["parameters"],
         }
         for slug, t in TOOL_REGISTRY.items()
+        if not t.get("hidden")
     ]
-    categories = list({t["category"] for t in TOOL_REGISTRY.values()})
+    categories = list({t["category"] for t in TOOL_REGISTRY.values() if not t.get("hidden")})
     return {"tools": tools, "total": len(tools), "categories": sorted(categories)}
 
 
