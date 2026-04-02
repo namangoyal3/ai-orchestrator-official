@@ -697,46 +697,10 @@ def select_tools_and_marketplace(
     # Step 1: get catalog stack via existing LLM logic
     selected = select_tools(url, key, user_prompt, catalog, context, marketplace_agents, marketplace_tools)
 
-    # Step 2: get marketplace agent/tool picks from /v1/architect/design
-    confirmed_agents: list[dict] = []
-    confirmed_tools:  list[dict] = []
-    try:
-        ctx_extras: dict = {}
-        if context:
-            ctx_extras = {
-                "product_type":    context.get("product_type", ""),
-                "scale":           context.get("scale", ""),
-                "seo_required":    context.get("seo") == "Yes",
-                "team_size":       context.get("team_size", ""),
-            }
-        resp = httpx.post(
-            f"{url}/v1/architect/design",
-            json={"prompt": user_prompt, "optimization": "cost", **ctx_extras},
-            headers={"X-API-Key": key, "Content-Type": "application/json"},
-            timeout=30.0,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            rec_agent_slugs = set(data.get("recommended_agents", []))
-            rec_tool_slugs  = set(data.get("recommended_mcps", []))
-
-            def _slug_match(item: dict, slugs: set) -> bool:
-                s = (item.get("slug") or item.get("name") or "").lower().replace(" ", "-")
-                n = (item.get("name") or "").lower()
-                return any(x.lower() in s or x.lower() in n or s in x.lower() for x in slugs)
-
-            if marketplace_agents:
-                confirmed_agents = [a for a in marketplace_agents[:20] if _slug_match(a, rec_agent_slugs)][:4]
-                if not confirmed_agents and rec_agent_slugs:
-                    confirmed_agents = marketplace_agents[:2]
-            if marketplace_tools:
-                confirmed_tools = [t for t in marketplace_tools[:20] if _slug_match(t, rec_tool_slugs)][:4]
-                if not confirmed_tools and rec_tool_slugs:
-                    confirmed_tools = marketplace_tools[:2]
-    except Exception:
-        pass
-
-    return selected, confirmed_agents, confirmed_tools
+    # Marketplace agents/tools are never auto-confirmed — they require explicit
+    # user selection via the marketplace picker. Return empty lists here so
+    # the blueprint stays clean: only real tech stack tools, no AI add-ons.
+    return selected, [], []
 
 
 def select_tools(
