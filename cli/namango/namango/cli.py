@@ -31,7 +31,7 @@ import httpx
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DEFAULT_GATEWAY = os.getenv("GATEWAY_URL", "https://ai-gateway-backend-production.up.railway.app")
-DEFAULT_KEY     = os.getenv("API_KEY", "gw-demo-key-change-in-production-12345678")
+DEFAULT_KEY     = os.getenv("API_KEY", "gw-2FUCNsU7HA3YnpDP8n0LFaWzLSQ9DJRfbaKseoY38rE")
 DEFAULT_MODEL   = "meta-llama/llama-3.1-70b-instruct"
 
 # ── ANSI ─────────────────────────────────────────────────────────────────────
@@ -781,9 +781,9 @@ def select_tools(
         + (f"\n\n{mp_block}" if mp_block else "")
         + f"\n\nSelect 6-10 tools covering ALL five layers: frontend, backend, database, auth, notifications.\n"
         f"Prefer [OSS] tools. For each tool, write a reason specific to THIS product — not generic.\n"
-        f"Reply with ONLY a JSON array, no markdown, no explanation:\n"
-        f'[{{"name":"<exact name from catalog>", "category":"<category>", '
-        f'"tier":"free|freemium|paid", "reason":"one sentence — why this tool specifically for this product and context"}}]'
+        f"Output each selected tool on its own line using this exact format (one line per tool, nothing else):\n"
+        f"TOOL: <exact name from catalog> | CATEGORY: <category> | TIER: <free or freemium or paid> | REASON: <one sentence specific to this product>\n"
+        f"Example: TOOL: React | CATEGORY: web | TIER: free | REASON: Component model ideal for ticket list views and real-time order status"
     )
 
     # Build name → item lookup for enrichment
@@ -814,39 +814,32 @@ def select_tools(
         )
         if resp.status_code == 200:
             text = resp.json().get("response", "").strip()
-            parsed = None
-            if text.startswith("["):
-                try:
-                    parsed = json.loads(text)
-                except json.JSONDecodeError:
-                    pass
-            if parsed is None:
-                m = re.search(r'\[[\s\S]*\]', text)
-                if m:
-                    try:
-                        parsed = json.loads(m.group(0))
-                    except json.JSONDecodeError:
-                        pass
-            if parsed and isinstance(parsed, list):
-                enriched: list[dict] = []
-                seen: set[str] = set()
-                for item in parsed:
-                    name_val = item.get("name", "")
-                    catalog_item = _lookup(name_val)
-                    canonical_name = catalog_item.get("name") or name_val
-                    if canonical_name.lower() in seen:
-                        continue
-                    seen.add(canonical_name.lower())
-                    enriched.append({
-                        "slug":     catalog_item.get("slug") or name_val.lower().replace(" ", "-"),
-                        "name":     canonical_name,
-                        "category": catalog_item.get("category") or item.get("category", "?"),
-                        "tier":     catalog_item.get("tier") or item.get("tier", "free"),
-                        "monthly_cost_usd": catalog_item.get("monthly_cost_usd", 0),
-                        "reason":   item.get("reason", ""),
-                    })
-                if enriched:
-                    return enriched
+            enriched: list[dict] = []
+            seen: set[str] = set()
+            for line in text.splitlines():
+                line = line.strip()
+                if not line.upper().startswith("TOOL:"):
+                    continue
+                parts = {p.split(":", 1)[0].strip().upper(): p.split(":", 1)[1].strip()
+                         for p in line.split("|") if ":" in p}
+                name_val = parts.get("TOOL", "").strip()
+                if not name_val:
+                    continue
+                catalog_item = _lookup(name_val)
+                canonical_name = catalog_item.get("name") or name_val
+                if canonical_name.lower() in seen:
+                    continue
+                seen.add(canonical_name.lower())
+                enriched.append({
+                    "slug":     catalog_item.get("slug") or name_val.lower().replace(" ", "-"),
+                    "name":     canonical_name,
+                    "category": catalog_item.get("category") or parts.get("CATEGORY", "?"),
+                    "tier":     catalog_item.get("tier") or parts.get("TIER", "free"),
+                    "monthly_cost_usd": catalog_item.get("monthly_cost_usd", 0),
+                    "reason":   parts.get("REASON", ""),
+                })
+            if enriched:
+                return enriched
     except Exception:
         pass
 
