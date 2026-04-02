@@ -29,7 +29,7 @@ from typing import Optional
 
 from app.api.catalog_utils import find_tool
 
-router = APIRouter(prefix="/v1/tools", tags=["Activate"])
+router = APIRouter(tags=["Activate"])
 
 # NOTE: GET /v1/tools/activation-types is registered here BEFORE /{slug}/activate
 # so FastAPI doesn't capture "activation-types" as a slug parameter.
@@ -115,7 +115,7 @@ def _build_next_steps(tool_name: str, tool_slug: str, cfg: dict, exec_type: str)
     return steps
 
 
-@router.get("/activation-types", summary="List all execution types and what they mean")
+@router.get("/v1/stacks/execution-types", summary="List all execution types and what they mean")
 async def activation_types():
     """Returns the execution_type taxonomy used across the catalog."""
     return {
@@ -130,7 +130,7 @@ async def activation_types():
     }
 
 
-@router.post("/{slug}/activate", response_model=ActivateResponse, summary="Activate a tool from the catalog")
+@router.post("/v1/tools/{slug}/activate", response_model=ActivateResponse, summary="Activate a tool from the catalog")
 async def activate_tool(slug: str):
     """
     Returns everything needed to immediately start using a tool from the Namango catalog.
