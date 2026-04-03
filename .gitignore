@@ -11,6 +11,7 @@ dist/
 
 # AI Gateway
 backend/*.db
+backend/**/*.db
 backend/gateway.db
 frontend/node_modules/
 frontend/.next/
