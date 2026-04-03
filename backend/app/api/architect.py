@@ -112,7 +112,19 @@ async def design_architecture(request: ArchitectRequest, db: AsyncSession = Depe
     )
 
     # 5. Architect LLM Logic — route to best available provider
-    architect_choice = route_llm("reasoning", ComplexityLevel.HIGH)
+    try:
+        architect_choice = route_llm("reasoning", ComplexityLevel.HIGH)
+    except RuntimeError:
+        logger.warning("No LLM providers configured — returning architecture defaults")
+        return {
+            "framework": "LangChain (Python)",
+            "recommended_stack": ["Next.js", "FastAPI", "PostgreSQL", "Supabase Auth", "Resend"],
+            "recommended_agents": ["research", "code"],
+            "recommended_mcps": ["web_search", "web_scrape"],
+            "recommended_llm": "gpt-4o-mini" if request.optimization == "cost" else "claude-opus-4-6",
+            "explanation": "Architecture defaults used — no LLM provider keys configured.",
+            "error_fallback": True,
+        }
 
     system_prompt = f"""You are the Namango Solutions Architect — a senior principal engineer and CTO-level technical advisor responsible for designing production-grade, cost-efficient application architectures.
 
@@ -168,7 +180,7 @@ OUTPUT: Respond with ONLY a valid JSON object. No markdown, no backticks, no exp
         logger.exception("Architect LLM call failed for prompt=%r", request.prompt[:200])
         return {
             "framework": "LangChain (Python)",
-            "recommended_stack": ["FastAPI", "PostgreSQL", "Redis", "Docker", "Next.js"],
+            "recommended_stack": ["Next.js", "FastAPI", "PostgreSQL", "Supabase Auth", "Resend"],
             "recommended_agents": ["research", "code"],
             "recommended_mcps": ["web_search", "web_scrape"],
             "recommended_llm": "gpt-4o-mini" if request.optimization == "cost" else "claude-opus-4-6",
